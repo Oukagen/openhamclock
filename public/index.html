@@ -2009,6 +2009,11 @@
               </div>
             )}
           </div>
+          <div style={{ marginTop: '8px', textAlign: 'right', fontSize: '9px' }}>
+            <a href="https://www.contestcalendar.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
+              WA7BNM Contest Calendar
+            </a>
+          </div>
         </div>
       );
     };
@@ -2216,6 +2221,11 @@
                     </div>
                   </div>
                 ))}
+              </div>
+              <div style={{ marginTop: '4px', textAlign: 'right', fontSize: '9px' }}>
+                <a href="https://www.contestcalendar.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
+                  WA7BNM Contest Calendar
+                </a>
               </div>
             </div>
 
@@ -2909,7 +2919,7 @@
             {/* Contests - Compact */}
             <div className="panel" style={{ padding: '10px', flex: '1 1 auto', overflow: 'hidden', minHeight: 0 }}>
               <div style={{ fontSize: '12px', color: 'var(--accent-purple)', fontWeight: '700', marginBottom: '6px' }}>🏆 CONTESTS</div>
-              <div style={{ overflow: 'auto', maxHeight: 'calc(100% - 20px)', fontSize: '12px', fontFamily: 'JetBrains Mono' }}>
+              <div style={{ overflow: 'auto', maxHeight: 'calc(100% - 30px)', fontSize: '12px', fontFamily: 'JetBrains Mono' }}>
                 {contests.data.slice(0, 6).map((c, i) => (
                   <div key={i} style={{ padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                     <div style={{ color: c.status === 'active' ? 'var(--accent-green)' : 'var(--text-secondary)', fontWeight: c.status === 'active' ? '700' : '400' }}>
@@ -2920,6 +2930,11 @@
                     </div>
                   </div>
                 ))}
+              </div>
+              <div style={{ marginTop: '4px', textAlign: 'right', fontSize: '9px' }}>
+                <a href="https://www.contestcalendar.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
+                  WA7BNM Contest Calendar
+                </a>
               </div>
             </div>
           </div>
