@@ -159,7 +159,7 @@ app.get('/api/dxpeditions', async (req, res) => {
       return res.json(dxpeditionCache.data);
     }
     
-    // Fetch NG3K ADXO plain text version (easier to parse)
+    // Fetch NG3K ADXO plain text version
     console.log('[DXpeditions] Fetching from NG3K...');
     const response = await fetch('https://www.ng3k.com/Misc/adxoplain.html');
     if (!response.ok) {
@@ -167,50 +167,103 @@ app.get('/api/dxpeditions', async (req, res) => {
       throw new Error('Failed to fetch NG3K: ' + response.status);
     }
     
-    const text = await response.text();
-    console.log('[DXpeditions] Received', text.length, 'bytes from NG3K');
+    let text = await response.text();
+    console.log('[DXpeditions] Received', text.length, 'bytes raw');
+    
+    // Strip HTML tags and decode entities - the "plain" page is actually HTML!
+    text = text
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '') // Remove scripts
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '') // Remove styles  
+      .replace(/<br\s*\/?>/gi, '\n') // Convert br to newlines
+      .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+    
+    console.log('[DXpeditions] Cleaned text length:', text.length);
+    console.log('[DXpeditions] First 500 chars:', text.substring(0, 500));
     
     const dxpeditions = [];
     
-    // Split by the bullet separator used in the plain text version
-    const entries = text.split(/\s*·\s*/);
-    console.log('[DXpeditions] Found', entries.length, 'entries to parse');
+    // Split by bullet separator (·) or newlines
+    const entries = text.split(/\s*·\s*|\n+/).filter(e => e.trim().length > 30);
+    console.log('[DXpeditions] Found', entries.length, 'potential entries');
     
-    let parseCount = 0;
+    // Log first 3 complete entries for debugging
+    entries.slice(0, 3).forEach((e, i) => {
+      console.log(`[DXpeditions] Entry ${i}:`, e.substring(0, 200));
+    });
+    
     for (const entry of entries) {
-      if (!entry.trim() || entry.length < 20) continue;
+      if (!entry.trim()) continue;
       
-      // Parse format: "Dec 7, 2025-Jan 5, 2026 DXCC: Guatemala Callsign: TG QSL: LoTW Source: ... Info: ..."
-      // More flexible regex patterns
-      const dxccMatch = entry.match(/DXCC:\s*([A-Za-z &\-'\.]+?)(?=\s*Callsign:|\s*QSL:|\s*Source:|\s*Info:|$)/i);
+      // Skip header/footer/legend content
+      if (entry.includes('ADXB=') || entry.includes('OPDX=') || entry.includes('425DX=') ||
+          entry.includes('Last updated') || entry.includes('Copyright') || 
+          entry.includes('Expired Announcements') || entry.includes('Table Version') ||
+          entry.includes('About ADXO') || entry.includes('Search ADXO') ||
+          entry.includes('GazDX=') || entry.includes('LNDX=') || entry.includes('TDDX=') ||
+          entry.includes('DXW.Net=') || entry.includes('DXMB=')) continue;
+      
+      // Try multiple parsing strategies
+      let callsign = null;
+      let entity = null;
+      let qsl = null;
+      let info = null;
+      let dateStr = null;
+      
+      // Strategy 1: "DXCC: xxx Callsign: xxx" format
+      const dxccMatch = entry.match(/DXCC:\s*([^C\n]+?)(?=Callsign:|QSL:|Source:|Info:|$)/i);
       const callMatch = entry.match(/Callsign:\s*([A-Z0-9\/]+)/i);
+      
+      if (callMatch && dxccMatch) {
+        callsign = callMatch[1].trim().toUpperCase();
+        entity = dxccMatch[1].trim();
+      }
+      
+      // Strategy 2: Look for callsign patterns directly (like "3Y0K" or "VP8/G3ABC")
+      if (!callsign) {
+        const directCallMatch = entry.match(/\b([A-Z]{1,2}\d[A-Z0-9]*[A-Z](?:\/[A-Z0-9]+)?)\b/);
+        if (directCallMatch) {
+          callsign = directCallMatch[1];
+        }
+      }
+      
+      // Strategy 3: Parse "Entity - Callsign" or similar patterns
+      if (!callsign) {
+        const altMatch = entry.match(/([A-Za-z\s&]+?)\s*[-–:]\s*([A-Z]{1,2}\d[A-Z0-9]*)/);
+        if (altMatch) {
+          entity = altMatch[1].trim();
+          callsign = altMatch[2].trim();
+        }
+      }
+      
+      // Extract other fields
       const qslMatch = entry.match(/QSL:\s*([A-Za-z0-9]+)/i);
       const infoMatch = entry.match(/Info:\s*(.+)/i);
+      const dateMatch = entry.match(/([A-Za-z]{3}\s+\d{1,2}(?:,?\s*\d{4})?(?:\s*[-–]\s*[A-Za-z]{3}\s+\d{1,2}(?:,?\s*\d{4})?)?)/i);
       
-      // Date pattern at the start: "Jan 1, 2026-Feb 16, 2026" or "Jan 1-16, 2026"
-      const dateMatch = entry.match(/^([A-Za-z]+\s+\d+[^D]*?)(?=\s*DXCC:)/i);
+      qsl = qslMatch ? qslMatch[1].trim() : '';
+      info = infoMatch ? infoMatch[1].trim() : '';
+      dateStr = dateMatch ? dateMatch[1].trim() : '';
       
-      // Log first few entries for debugging
-      if (parseCount < 3) {
-        console.log('[DXpeditions] Entry sample:', entry.substring(0, 150));
-        console.log('[DXpeditions] DXCC match:', dxccMatch?.[1]);
-        console.log('[DXpeditions] Call match:', callMatch?.[1]);
+      // Skip if we couldn't find a callsign
+      if (!callsign || callsign.length < 3) continue;
+      
+      // Skip obviously wrong matches
+      if (/^(DXCC|QSL|INFO|SOURCE|THE|AND|FOR)$/i.test(callsign)) continue;
+      
+      // Try to extract entity from context if not found
+      if (!entity && info) {
+        // Look for "from Entity" or "fm Entity" patterns
+        const fromMatch = info.match(/(?:from|fm)\s+([A-Za-z\s]+?)(?:;|,|$)/i);
+        if (fromMatch) entity = fromMatch[1].trim();
       }
-      parseCount++;
-      
-      // Must have both DXCC and Callsign to be valid
-      if (!callMatch || !dxccMatch) continue;
-      
-      const callsign = callMatch[1].trim().toUpperCase();
-      const entity = dxccMatch[1].trim();
-      const qsl = qslMatch ? qslMatch[1].trim() : '';
-      const info = infoMatch ? infoMatch[1].trim() : '';
-      const dateStr = dateMatch ? dateMatch[1].trim() : '';
-      
-      // Skip invalid entries
-      if (!callsign || callsign.length < 2 || !entity) continue;
-      // Skip if callsign looks like a date
-      if (/^\d{4}\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i.test(callsign)) continue;
       
       // Parse dates
       let startDate = null;
@@ -218,53 +271,52 @@ app.get('/api/dxpeditions', async (req, res) => {
       let isActive = false;
       let isUpcoming = false;
       
-      // Try to parse dates from dateStr
-      const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-      const datePattern = /([A-Za-z]+)\s+(\d+)(?:,?\s*(\d{4}))?(?:\s*[-–]\s*)?([A-Za-z]+)?\s*(\d+)?(?:,?\s*(\d{4}))?/;
-      const dateParsed = dateStr.match(datePattern);
-      
-      if (dateParsed) {
-        const currentYear = new Date().getFullYear();
+      if (dateStr) {
+        const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        const datePattern = /([A-Za-z]{3})\s+(\d{1,2})(?:,?\s*(\d{4}))?(?:\s*[-–]\s*([A-Za-z]{3})?\s*(\d{1,2})(?:,?\s*(\d{4}))?)?/i;
+        const dateParsed = dateStr.match(datePattern);
         
-        const startMonth = monthNames.indexOf(dateParsed[1].toLowerCase().substring(0, 3));
-        const startDay = parseInt(dateParsed[2]);
-        const startYear = dateParsed[3] ? parseInt(dateParsed[3]) : currentYear;
-        
-        const endMonthStr = dateParsed[4] || dateParsed[1];
-        const endMonth = monthNames.indexOf(endMonthStr.toLowerCase().substring(0, 3));
-        const endDay = parseInt(dateParsed[5]) || startDay + 14;
-        const endYear = dateParsed[6] ? parseInt(dateParsed[6]) : startYear;
-        
-        if (startMonth >= 0) {
-          startDate = new Date(startYear, startMonth, startDay);
-          endDate = new Date(endYear, endMonth >= 0 ? endMonth : startMonth, endDay);
+        if (dateParsed) {
+          const currentYear = new Date().getFullYear();
+          const startMonth = monthNames.indexOf(dateParsed[1].toLowerCase());
+          const startDay = parseInt(dateParsed[2]);
+          const startYear = dateParsed[3] ? parseInt(dateParsed[3]) : currentYear;
           
-          // Handle year rollover for date ranges like "Dec 15 - Jan 5"
-          if (endDate < startDate && !dateParsed[6]) {
-            endDate.setFullYear(endYear + 1);
+          const endMonthStr = dateParsed[4] || dateParsed[1];
+          const endMonth = monthNames.indexOf(endMonthStr.toLowerCase());
+          const endDay = parseInt(dateParsed[5]) || startDay + 14;
+          const endYear = dateParsed[6] ? parseInt(dateParsed[6]) : startYear;
+          
+          if (startMonth >= 0) {
+            startDate = new Date(startYear, startMonth, startDay);
+            endDate = new Date(endYear, endMonth >= 0 ? endMonth : startMonth, endDay);
+            
+            if (endDate < startDate && !dateParsed[6]) {
+              endDate.setFullYear(endYear + 1);
+            }
+            
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            isActive = startDate <= today && endDate >= today;
+            isUpcoming = startDate > today;
           }
-          
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          
-          isActive = startDate <= today && endDate >= today;
-          isUpcoming = startDate > today;
         }
       }
       
-      // Extract bands and modes from info
-      const bandsMatch = info.match(/(\d+(?:-\d+)?m)/g);
-      const bands = bandsMatch ? bandsMatch.join(' ') : '';
+      // Extract bands and modes
+      const bandsMatch = entry.match(/(\d+(?:-\d+)?m)/g);
+      const bands = bandsMatch ? [...new Set(bandsMatch)].join(' ') : '';
       
-      const modesMatch = info.match(/\b(CW|SSB|FT8|FT4|RTTY|PSK|FM|AM|DIGI)\b/gi);
+      const modesMatch = entry.match(/\b(CW|SSB|FT8|FT4|RTTY|PSK|FM|AM|DIGI)\b/gi);
       const modes = modesMatch ? [...new Set(modesMatch.map(m => m.toUpperCase()))].join(' ') : '';
       
       dxpeditions.push({
         callsign,
-        entity,
+        entity: entity || 'Unknown',
         dates: dateStr,
         qsl,
-        info: info.substring(0, 100), // Truncate info
+        info: (info || '').substring(0, 100),
         bands,
         modes,
         startDate: startDate?.toISOString(),
@@ -274,8 +326,16 @@ app.get('/api/dxpeditions', async (req, res) => {
       });
     }
     
+    // Remove duplicates by callsign
+    const seen = new Set();
+    const uniqueDxpeditions = dxpeditions.filter(d => {
+      if (seen.has(d.callsign)) return false;
+      seen.add(d.callsign);
+      return true;
+    });
+    
     // Sort: active first, then upcoming by start date
-    dxpeditions.sort((a, b) => {
+    uniqueDxpeditions.sort((a, b) => {
       if (a.isActive && !b.isActive) return -1;
       if (!a.isActive && b.isActive) return 1;
       if (a.isUpcoming && !b.isUpcoming) return -1;
@@ -284,17 +344,21 @@ app.get('/api/dxpeditions', async (req, res) => {
       return 0;
     });
     
+    console.log('[DXpeditions] Parsed', uniqueDxpeditions.length, 'unique entries');
+    if (uniqueDxpeditions.length > 0) {
+      console.log('[DXpeditions] First entry:', JSON.stringify(uniqueDxpeditions[0]));
+    }
+    
     const result = {
-      dxpeditions: dxpeditions.slice(0, 50),
-      active: dxpeditions.filter(d => d.isActive).length,
-      upcoming: dxpeditions.filter(d => d.isUpcoming).length,
+      dxpeditions: uniqueDxpeditions.slice(0, 50),
+      active: uniqueDxpeditions.filter(d => d.isActive).length,
+      upcoming: uniqueDxpeditions.filter(d => d.isUpcoming).length,
       source: 'NG3K ADXO',
       timestamp: new Date().toISOString()
     };
     
-    console.log('[DXpeditions] Parsed', dxpeditions.length, 'valid entries,', result.active, 'active,', result.upcoming, 'upcoming');
+    console.log('[DXpeditions] Result:', result.active, 'active,', result.upcoming, 'upcoming');
     
-    // Cache the result
     dxpeditionCache.data = result;
     dxpeditionCache.timestamp = now;
     
@@ -302,7 +366,6 @@ app.get('/api/dxpeditions', async (req, res) => {
   } catch (error) {
     console.error('[DXpeditions] API error:', error.message);
     
-    // Return cached data if available, even if stale
     if (dxpeditionCache.data) {
       console.log('[DXpeditions] Returning stale cache');
       return res.json({ ...dxpeditionCache.data, stale: true });
