@@ -1093,6 +1093,37 @@
     };
 
     // ============================================
+    // DXPEDITION TRACKING HOOK
+    // ============================================
+    const useDXpeditions = () => {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        const fetchDXpeditions = async () => {
+          try {
+            const response = await fetch('/api/dxpeditions');
+            if (response.ok) {
+              const result = await response.json();
+              setData(result);
+            }
+          } catch (err) {
+            console.error('DXpedition fetch error:', err);
+          } finally {
+            setLoading(false);
+          }
+        };
+        
+        fetchDXpeditions();
+        // Refresh every 30 minutes
+        const interval = setInterval(fetchDXpeditions, 30 * 60 * 1000);
+        return () => clearInterval(interval);
+      }, []);
+
+      return { data, loading };
+    };
+
+    // ============================================
     // SATELLITE TRACKING HOOK
     // ============================================
     const useSatellites = (deLocation) => {
@@ -2543,6 +2574,90 @@
     );
 
     // ============================================
+    // DXPEDITION PANEL
+    // ============================================
+    const DXpeditionPanel = ({ data, loading }) => {
+      const formatDate = (isoString) => {
+        if (!isoString) return '';
+        const date = new Date(isoString);
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      };
+      
+      const getStatusStyle = (expedition) => {
+        if (expedition.isActive) {
+          return { bg: 'rgba(0, 255, 136, 0.15)', border: 'var(--accent-green)', color: 'var(--accent-green)' };
+        }
+        if (expedition.isUpcoming) {
+          return { bg: 'rgba(0, 170, 255, 0.15)', border: 'var(--accent-cyan)', color: 'var(--accent-cyan)' };
+        }
+        return { bg: 'var(--bg-tertiary)', border: 'var(--border-color)', color: 'var(--text-muted)' };
+      };
+
+      return (
+        <div className="panel" style={{ padding: '12px' }}>
+          <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span>🌍 DXPEDITIONS</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {loading && <div className="loading-spinner" />}
+              {data && (
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                  {data.active > 0 && <span style={{ color: 'var(--accent-green)' }}>{data.active} active</span>}
+                  {data.active > 0 && data.upcoming > 0 && ' • '}
+                  {data.upcoming > 0 && <span style={{ color: 'var(--accent-cyan)' }}>{data.upcoming} upcoming</span>}
+                </span>
+              )}
+            </div>
+          </div>
+          
+          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+            {data?.dxpeditions?.length > 0 ? (
+              data.dxpeditions.slice(0, 15).map((exp, idx) => {
+                const style = getStatusStyle(exp);
+                return (
+                  <div key={idx} style={{ 
+                    padding: '6px 8px',
+                    marginBottom: '4px',
+                    background: style.bg,
+                    borderLeft: `3px solid ${style.border}`,
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    fontFamily: 'JetBrains Mono, monospace'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--accent-amber)', fontWeight: '700' }}>{exp.callsign}</span>
+                      <span style={{ color: style.color, fontSize: '10px' }}>
+                        {exp.isActive ? '● ACTIVE' : exp.isUpcoming ? 'UPCOMING' : 'PAST'}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {exp.entity}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{exp.dates}</span>
+                      {exp.qsl && <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{exp.qsl.substring(0, 15)}</span>}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                {loading ? 'Loading DXpeditions...' : 'No DXpedition data available'}
+              </div>
+            )}
+          </div>
+          
+          {data && (
+            <div style={{ marginTop: '6px', textAlign: 'right', fontSize: '9px' }}>
+              <a href="https://www.ng3k.com/misc/adxo.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'none' }}>
+                NG3K ADXO Calendar
+              </a>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ============================================
     // CONTEST CALENDAR PANEL
     // ============================================
     const ContestPanel = ({ contests, loading }) => {
@@ -2635,7 +2750,7 @@
     const LegacyLayout = ({ 
       config, currentTime, utcTime, utcDate, localTime, localDate,
       deGrid, dxGrid, deSunTimes, dxSunTimes, dxLocation, onDXChange,
-      spaceWeather, bandConditions, solarIndices, potaSpots, dxCluster, dxPaths, contests, propagation, mySpots, satellites,
+      spaceWeather, bandConditions, solarIndices, potaSpots, dxCluster, dxPaths, dxpeditions, contests, propagation, mySpots, satellites,
       localWeather, use12Hour, onTimeFormatToggle,
       onSettingsClick, onFullscreenToggle, isFullscreen,
       mapLayers, toggleDXPaths, togglePOTA, toggleSatellites
@@ -2933,6 +3048,40 @@
                     <div style={{ color: 'var(--text-muted)', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.comment}</div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* DXpeditions */}
+            <div style={{ marginTop: '8px' }}>
+              <div style={{ ...labelStyle, marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>🌍 DXPEDITIONS</span>
+                {dxpeditions.data?.active > 0 && (
+                  <span style={{ fontSize: '9px', color: 'var(--accent-green)' }}>{dxpeditions.data.active} active</span>
+                )}
+              </div>
+              <div style={{ maxHeight: '120px', overflowY: 'auto' }}>
+                {dxpeditions.data?.dxpeditions?.slice(0, 6).map((exp, i) => (
+                  <div key={i} style={{ 
+                    padding: '3px 0', 
+                    borderBottom: '1px solid rgba(255,255,255,0.05)', 
+                    fontSize: '12px',
+                    borderLeft: exp.isActive ? '2px solid var(--accent-green)' : 'none',
+                    paddingLeft: exp.isActive ? '6px' : '0'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{exp.callsign}</span>
+                      <span style={{ color: exp.isActive ? 'var(--accent-green)' : 'var(--text-muted)', fontSize: '10px' }}>
+                        {exp.isActive ? '● NOW' : ''}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{exp.entity}</div>
+                  </div>
+                ))}
+                {!dxpeditions.data?.dxpeditions?.length && (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                    {dxpeditions.loading ? 'Loading...' : 'No data'}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -3508,6 +3657,7 @@
       const potaSpots = usePOTASpots();
       const dxCluster = useDXCluster(config.dxClusterSource || 'auto');
       const dxPaths = useDXPaths();
+      const dxpeditions = useDXpeditions();
       const contests = useContests();
       const propagation = usePropagation(config.location, dxLocation);
       const mySpots = useMySpots(config.callsign);
@@ -3588,6 +3738,7 @@
               potaSpots={potaSpots}
               dxCluster={dxCluster}
               dxPaths={dxPaths}
+              dxpeditions={dxpeditions}
               contests={contests}
               propagation={propagation}
               mySpots={mySpots}
@@ -3813,6 +3964,47 @@
                   </div>
                 ))}
                 {dxCluster.data.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No spots</div>}
+              </div>
+            </div>
+            
+            {/* DXpeditions - Compact */}
+            <div className="panel" style={{ padding: '10px', flex: '0 0 auto', maxHeight: '150px', overflow: 'hidden' }}>
+              <div style={{ fontSize: '12px', color: 'var(--accent-cyan)', fontWeight: '700', marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>🌍 DXPEDITIONS</span>
+                {dxpeditions.data && (
+                  <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontWeight: '400' }}>
+                    {dxpeditions.data.active > 0 && <span style={{ color: 'var(--accent-green)' }}>{dxpeditions.data.active} active</span>}
+                  </span>
+                )}
+              </div>
+              <div style={{ overflow: 'auto', maxHeight: '110px', fontSize: '11px', fontFamily: 'JetBrains Mono' }}>
+                {dxpeditions.data?.dxpeditions?.slice(0, 8).map((exp, i) => (
+                  <div key={i} style={{ 
+                    padding: '3px 0', 
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    borderLeft: exp.isActive ? '2px solid var(--accent-green)' : exp.isUpcoming ? '2px solid var(--accent-cyan)' : 'none',
+                    paddingLeft: (exp.isActive || exp.isUpcoming) ? '6px' : '0'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{exp.callsign}</span>
+                      <span style={{ color: exp.isActive ? 'var(--accent-green)' : 'var(--text-muted)', fontSize: '9px' }}>
+                        {exp.isActive ? '● NOW' : exp.dates?.split('-')[0] || ''}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '10px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {exp.entity}
+                    </div>
+                  </div>
+                ))}
+                {(!dxpeditions.data?.dxpeditions || dxpeditions.data.dxpeditions.length === 0) && 
+                  <div style={{ color: 'var(--text-muted)' }}>{dxpeditions.loading ? 'Loading...' : 'No DXpeditions'}</div>
+                }
+              </div>
+              <div style={{ marginTop: '4px', textAlign: 'right' }}>
+                <a href="https://www.ng3k.com/misc/adxo.html" target="_blank" rel="noopener noreferrer" 
+                   style={{ fontSize: '8px', color: 'var(--text-muted)', textDecoration: 'none' }}>
+                  NG3K ADXO
+                </a>
               </div>
             </div>
             

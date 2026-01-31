@@ -145,6 +145,144 @@ app.get('/api/solar-indices', async (req, res) => {
   }
 });
 
+// DXpedition Calendar - fetches from NG3K ADXO
+let dxpeditionCache = { data: null, timestamp: 0, maxAge: 30 * 60 * 1000 }; // 30 min cache
+
+app.get('/api/dxpeditions', async (req, res) => {
+  try {
+    const now = Date.now();
+    
+    // Return cached data if fresh
+    if (dxpeditionCache.data && (now - dxpeditionCache.timestamp) < dxpeditionCache.maxAge) {
+      return res.json(dxpeditionCache.data);
+    }
+    
+    // Fetch NG3K ADXO page
+    const response = await fetch('https://www.ng3k.com/misc/adxo.html');
+    if (!response.ok) throw new Error('Failed to fetch NG3K');
+    
+    const html = await response.text();
+    const dxpeditions = [];
+    
+    // Parse the HTML table - NG3K uses a specific format
+    // Look for table rows with DXpedition data
+    const tableMatch = html.match(/<table[^>]*>[\s\S]*?<\/table>/gi);
+    
+    if (tableMatch) {
+      // Find the main data table (usually the largest one)
+      for (const table of tableMatch) {
+        const rows = table.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi);
+        if (!rows || rows.length < 5) continue;
+        
+        for (const row of rows) {
+          // Skip header rows
+          if (row.includes('<th') || row.includes('CALLSIGN') || row.includes('ENTITY')) continue;
+          
+          // Extract cells
+          const cells = row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+          if (!cells || cells.length < 4) continue;
+          
+          // Clean cell content
+          const cleanCell = (cell) => {
+            return cell
+              .replace(/<[^>]*>/g, '') // Remove HTML tags
+              .replace(/&nbsp;/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .trim();
+          };
+          
+          const callsign = cleanCell(cells[0] || '');
+          const entity = cleanCell(cells[1] || '');
+          const dates = cleanCell(cells[2] || '');
+          const qsl = cleanCell(cells[3] || '');
+          
+          // Skip if no valid callsign
+          if (!callsign || callsign.length < 2 || callsign.includes('CALLSIGN')) continue;
+          
+          // Parse dates (format varies: "Jan 15-Feb 28" or "2024 Jan 15-Feb 28")
+          let startDate = null;
+          let endDate = null;
+          let isActive = false;
+          let isUpcoming = false;
+          
+          const dateMatch = dates.match(/(\w+)\s+(\d+)[\s\-]+(\w+)?\s*(\d+)?/);
+          if (dateMatch) {
+            const year = new Date().getFullYear();
+            const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+            
+            const startMonth = monthNames.indexOf(dateMatch[1].toLowerCase().substring(0, 3));
+            const startDay = parseInt(dateMatch[2]);
+            const endMonth = dateMatch[3] ? monthNames.indexOf(dateMatch[3].toLowerCase().substring(0, 3)) : startMonth;
+            const endDay = parseInt(dateMatch[4]) || startDay + 7;
+            
+            if (startMonth >= 0) {
+              startDate = new Date(year, startMonth, startDay);
+              endDate = new Date(year, endMonth >= 0 ? endMonth : startMonth, endDay);
+              
+              // Handle year rollover
+              if (endDate < startDate) {
+                endDate.setFullYear(year + 1);
+              }
+              
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              
+              isActive = startDate <= today && endDate >= today;
+              isUpcoming = startDate > today;
+            }
+          }
+          
+          dxpeditions.push({
+            callsign,
+            entity,
+            dates,
+            qsl,
+            startDate: startDate?.toISOString(),
+            endDate: endDate?.toISOString(),
+            isActive,
+            isUpcoming
+          });
+        }
+      }
+    }
+    
+    // Sort: active first, then upcoming by start date, then past
+    dxpeditions.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      if (a.isUpcoming && !b.isUpcoming) return -1;
+      if (!a.isUpcoming && b.isUpcoming) return 1;
+      if (a.startDate && b.startDate) return new Date(a.startDate) - new Date(b.startDate);
+      return 0;
+    });
+    
+    const result = {
+      dxpeditions: dxpeditions.slice(0, 50), // Limit to 50 entries
+      active: dxpeditions.filter(d => d.isActive).length,
+      upcoming: dxpeditions.filter(d => d.isUpcoming).length,
+      source: 'NG3K ADXO',
+      timestamp: new Date().toISOString()
+    };
+    
+    // Cache the result
+    dxpeditionCache.data = result;
+    dxpeditionCache.timestamp = now;
+    
+    res.json(result);
+  } catch (error) {
+    console.error('DXpedition API error:', error.message);
+    
+    // Return cached data if available, even if stale
+    if (dxpeditionCache.data) {
+      return res.json({ ...dxpeditionCache.data, stale: true });
+    }
+    
+    res.status(500).json({ error: 'Failed to fetch DXpedition data' });
+  }
+});
+
 // NOAA Space Weather - X-Ray Flux
 app.get('/api/noaa/xray', async (req, res) => {
   try {
