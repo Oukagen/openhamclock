@@ -25,20 +25,27 @@ RUN curl -L -o ITURHFProp "https://github.com/ITU-R-Study-Group-3/ITU-R-HF/relea
 # Download source to get Data files
 RUN curl -L -o source.tar.gz "https://github.com/ITU-R-Study-Group-3/ITU-R-HF/archive/refs/tags/v14.3.tar.gz" \
     && tar -xzf source.tar.gz \
-    && echo "=== Top level ===" && ls -la ITU-R-HF-14.3/ \
-    && echo "=== Finding Data ===" && find ITU-R-HF-14.3 -type d -name "Data" \
-    && echo "=== Finding IonMap ===" && find ITU-R-HF-14.3 -type d -name "IonMap"
+    && echo "=== Finding all Data directories ===" \
+    && find ITU-R-HF-14.3 -type d -name "Data" \
+    && echo "=== Finding ionos files ===" \
+    && find ITU-R-HF-14.3 -name "ionos*.bin" \
+    && echo "=== Finding ant files ===" \
+    && find ITU-R-HF-14.3 -name "*.ant" \
+    && echo "=== Finding COEFF files ===" \
+    && find ITU-R-HF-14.3 -name "COEFF*.BIN" | head -5
 
-# Move Data directories - try multiple possible locations
-RUN if [ -d "ITU-R-HF-14.3/P533/Data" ]; then cp -r ITU-R-HF-14.3/P533/Data .; \
-    elif [ -d "ITU-R-HF-14.3/Data" ]; then cp -r ITU-R-HF-14.3/Data .; \
-    else echo "ERROR: Data not found!" && exit 1; fi
-
-# IonMap might be inside P533 or at root level  
-RUN if [ -d "ITU-R-HF-14.3/P533/IonMap" ]; then cp -r ITU-R-HF-14.3/P533/IonMap .; \
-    elif [ -d "ITU-R-HF-14.3/IonMap" ]; then cp -r ITU-R-HF-14.3/IonMap .; \
-    elif [ -d "ITU-R-HF-14.3/P533/Src/IonMap" ]; then cp -r ITU-R-HF-14.3/P533/Src/IonMap .; \
-    else echo "WARNING: IonMap not found, checking if embedded in Data..." && ls -la Data/; fi
+# Create Data directory and copy ALL required files from various locations
+RUN mkdir -p Data \
+    && echo "=== Copying COEFF files ===" \
+    && find ITU-R-HF-14.3 -name "COEFF*.BIN" -exec cp {} Data/ \; \
+    && find ITU-R-HF-14.3 -name "COEFF*.txt" -exec cp {} Data/ \; \
+    && echo "=== Copying ionos files ===" \
+    && find ITU-R-HF-14.3 -name "ionos*.bin" -exec cp {} Data/ \; \
+    && echo "=== Copying antenna files ===" \
+    && find ITU-R-HF-14.3 -name "*.ant" -exec cp {} Data/ \; \
+    && echo "=== Copying any other data files ===" \
+    && find ITU-R-HF-14.3 -name "P372*.txt" -exec cp {} Data/ \; 2>/dev/null || true \
+    && find ITU-R-HF-14.3 -name "*.csv" -exec cp {} Data/ \; 2>/dev/null || true
 
 # Cleanup
 RUN rm -rf ITU-R-HF-14.3 source.tar.gz
@@ -46,10 +53,9 @@ RUN rm -rf ITU-R-HF-14.3 source.tar.gz
 # Set library path so ITURHFProp can find shared libs
 ENV LD_LIBRARY_PATH=/opt/iturhfprop:$LD_LIBRARY_PATH
 
-# Verify installation
+# Verify installation - show all files in Data
 RUN echo "=== Binary files ===" && ls -la /opt/iturhfprop/*.so /opt/iturhfprop/ITURHFProp \
-    && echo "=== Data directory ===" && ls /opt/iturhfprop/Data/ | head -10 \
-    && echo "=== IonMap directory ===" && ls /opt/iturhfprop/IonMap/ | head -5
+    && echo "=== Data directory contents ===" && ls -la /opt/iturhfprop/Data/
 
 # Set up the API service
 WORKDIR /app

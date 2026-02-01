@@ -77,12 +77,10 @@ function generateInputFile(params) {
   // Format frequencies
   const freqList = frequencies.map(f => f.toFixed(3)).join(' ');
   
-  // ITURHFProp input file format
-  const input = `PathName "OpenHamClock Prediction"
-PathTXName "TX"
+  // ITURHFProp input file format - minimal version without external antenna files
+  const input = `PathName "OpenHamClock"
 Path.L_tx.lat ${txLat.toFixed(4)}
 Path.L_tx.lng ${txLon.toFixed(4)}
-PathRXName "RX"
 Path.L_rx.lat ${rxLat.toFixed(4)}
 Path.L_rx.lng ${rxLon.toFixed(4)}
 Path.year ${year}
@@ -97,12 +95,6 @@ Path.Relr ${requiredReliability}
 Path.ManMadeNoise ${manMadeNoise}
 Path.Modulation ANALOG
 Path.SorL SHORTPATH
-TXAntFilePath ${ITURHFPROP_DATA}/Data/Isotropic.ant
-RXAntFilePath ${ITURHFPROP_DATA}/Data/Isotropic.ant
-TXAnt.Alt 0.0
-TXAnt.Gain ${txGain.toFixed(1)}
-RXAnt.Alt 0.0
-RXAnt.Gain ${rxGain.toFixed(1)}
 DataFilePath ${ITURHFPROP_DATA}/Data/
 `;
 
@@ -263,14 +255,16 @@ app.get('/api/health', (req, res) => {
   const binaryExists = fs.existsSync(ITURHFPROP_PATH);
   const dataExists = fs.existsSync(ITURHFPROP_DATA);
   const dataSubExists = fs.existsSync(ITURHFPROP_DATA + '/Data');
-  const ionMapExists = fs.existsSync(ITURHFPROP_DATA + '/IonMap');
   
   // Check for shared libraries
   const libp533Exists = fs.existsSync('/opt/iturhfprop/libp533.so');
   const libp372Exists = fs.existsSync('/opt/iturhfprop/libp372.so');
   
+  // Check for ionospheric data (ionos12.bin in Data folder)
+  const ionosDataExists = fs.existsSync(ITURHFPROP_DATA + '/Data/ionos12.bin');
+  
   res.json({
-    status: binaryExists && dataSubExists && ionMapExists && libp533Exists ? 'healthy' : 'degraded',
+    status: binaryExists && dataSubExists && libp533Exists && ionosDataExists ? 'healthy' : 'degraded',
     service: 'iturhfprop',
     version: '1.0.0',
     engine: 'ITURHFProp (ITU-R P.533-14)',
@@ -278,7 +272,7 @@ app.get('/api/health', (req, res) => {
     libp533: libp533Exists ? 'found' : 'missing',
     libp372: libp372Exists ? 'found' : 'missing',
     dataDir: dataSubExists ? 'found' : 'missing',
-    ionMapDir: ionMapExists ? 'found' : 'missing',
+    ionosData: ionosDataExists ? 'found' : 'missing',
     paths: {
       binary: ITURHFPROP_PATH,
       data: ITURHFPROP_DATA
@@ -321,17 +315,18 @@ app.get('/api/diag', async (req, res) => {
   
   // Check data files
   try {
-    const dataFiles = fs.readdirSync(ITURHFPROP_DATA + '/Data').slice(0, 10);
+    const dataFiles = fs.readdirSync(ITURHFPROP_DATA + '/Data').slice(0, 15);
     results.data.dataDir = dataFiles;
   } catch (e) {
     results.data.dataDir = { error: e.message };
   }
   
+  // Check for ionospheric data
   try {
-    const ionFiles = fs.readdirSync(ITURHFPROP_DATA + '/IonMap').slice(0, 5);
-    results.data.ionMapDir = ionFiles;
+    const ionosExists = fs.existsSync(ITURHFPROP_DATA + '/Data/ionos12.bin');
+    results.data.ionosData = ionosExists ? 'found' : 'missing';
   } catch (e) {
-    results.data.ionMapDir = { error: e.message };
+    results.data.ionosData = { error: e.message };
   }
   
   // Try running ldd on the binary
