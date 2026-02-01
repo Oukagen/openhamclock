@@ -74,8 +74,8 @@ function generateInputFile(params) {
   const rxLatStr = rxLat >= 0 ? `${rxLat.toFixed(2)} N` : `${Math.abs(rxLat).toFixed(2)} S`;
   const rxLonStr = rxLon >= 0 ? `${rxLon.toFixed(2)} E` : `${Math.abs(rxLon).toFixed(2)} W`;
 
-  // Format frequencies
-  const freqList = frequencies.map(f => f.toFixed(3)).join(' ');
+  // Format frequencies - comma-separated per ITURHFProp docs
+  const freqList = frequencies.map(f => f.toFixed(3)).join(', ');
   
   // ITURHFProp input file format - complete version with all required fields
   const input = `PathName "OpenHamClock"
@@ -92,7 +92,7 @@ RXGOS 0.0
 AntennaOrientation "TX2RX"
 Path.year ${year}
 Path.month ${month}
-Path.hour ${hour}
+Path.hour ${hour === 0 ? 24 : hour}
 Path.SSN ${ssn}
 Path.frequency ${freqList}
 Path.txpower ${(10 * Math.log10(txPower / 1000)).toFixed(1)}
@@ -263,10 +263,17 @@ async function runPrediction(params) {
     const elapsed = Date.now() - startTime;
     console.log(`[ITURHFProp] Completed in ${elapsed}ms`);
     
-    // Log raw output for debugging
+    // Check output file
     if (fs.existsSync(outputPath)) {
       const rawOutput = fs.readFileSync(outputPath, 'utf8');
+      const stats = fs.statSync(outputPath);
+      console.log(`[ITURHFProp] Output file exists, size: ${stats.size} bytes`);
       console.log(`[ITURHFProp] Raw output (first 2000 chars):\n${rawOutput.substring(0, 2000)}`);
+    } else {
+      console.log(`[ITURHFProp] Output file NOT FOUND at ${outputPath}`);
+      // Check if there's a report file in /tmp
+      const tmpFiles = fs.readdirSync('/tmp').filter(f => f.startsWith('RPT') || f.startsWith('PDD'));
+      console.log(`[ITURHFProp] Report files in /tmp: ${tmpFiles.join(', ') || 'none'}`);
     }
     
     // Parse output
