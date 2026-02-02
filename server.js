@@ -156,7 +156,10 @@ if (configMissing) {
 }
 
 // ITURHFProp service URL (optional - enables hybrid mode)
-const ITURHFPROP_URL = process.env.ITURHFPROP_URL || null;
+// Must be a full URL like https://iturhfprop.example.com
+const ITURHFPROP_URL = process.env.ITURHFPROP_URL && process.env.ITURHFPROP_URL.trim().startsWith('http') 
+  ? process.env.ITURHFPROP_URL.trim() 
+  : null;
 
 // Log configuration
 console.log(`[Config] Station: ${CONFIG.callsign} @ ${CONFIG.gridSquare || 'No grid'}`);
@@ -1780,16 +1783,15 @@ let tleCache = { data: null, timestamp: 0 };
 const TLE_CACHE_DURATION = 6 * 60 * 60 * 1000; // 6 hours
 
 app.get('/api/satellites/tle', async (req, res) => {
-  console.log('[Satellites] Fetching TLE data...');
-  
   try {
     const now = Date.now();
     
     // Return cached data if fresh
     if (tleCache.data && (now - tleCache.timestamp) < TLE_CACHE_DURATION) {
-      console.log('[Satellites] Returning cached TLE data');
       return res.json(tleCache.data);
     }
+    
+    console.log('[Satellites] Fetching fresh TLE data...');
     
     // Fetch fresh TLE data from CelesTrak
     const tleData = {};
@@ -1829,7 +1831,6 @@ app.get('/api/satellites/tle', async (req, res) => {
                 tle1: line1,
                 tle2: line2
               };
-              console.log('[Satellites] Found TLE for:', key, noradId);
             }
           }
         }
@@ -1839,10 +1840,18 @@ app.get('/api/satellites/tle', async (req, res) => {
     // Also try to get ISS specifically (it's in the stations group)
     if (!tleData['ISS']) {
       try {
+        const issController = new AbortController();
+        const issTimeout = setTimeout(() => issController.abort(), 10000);
+        
         const issResponse = await fetch(
           'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=tle',
-          { headers: { 'User-Agent': 'OpenHamClock/3.3' } }
+          { 
+            headers: { 'User-Agent': 'OpenHamClock/3.3' },
+            signal: issController.signal
+          }
         );
+        clearTimeout(issTimeout);
+        
         if (issResponse.ok) {
           const issText = await issResponse.text();
           const issLines = issText.trim().split('\n');
@@ -1856,7 +1865,9 @@ app.get('/api/satellites/tle', async (req, res) => {
           }
         }
       } catch (e) {
-        console.log('[Satellites] Could not fetch ISS TLE:', e.message);
+        if (e.name !== 'AbortError') {
+          logErrorOnce('Satellites', `ISS TLE fetch: ${e.message}`);
+        }
       }
     }
     
@@ -1867,7 +1878,10 @@ app.get('/api/satellites/tle', async (req, res) => {
     res.json(tleData);
     
   } catch (error) {
-    console.error('[Satellites] TLE fetch error:', error.message);
+    // Don't spam logs for timeouts (AbortError) or network issues
+    if (error.name !== 'AbortError') {
+      logErrorOnce('Satellites', `TLE fetch error: ${error.message}`);
+    }
     // Return cached data even if stale, or empty object
     res.json(tleCache.data || {});
   }
