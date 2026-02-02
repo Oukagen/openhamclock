@@ -621,8 +621,8 @@ const App = () => {
         
         {/* RIGHT SIDEBAR */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', overflow: 'hidden' }}>
-          {/* DX Cluster - takes most space */}
-          <div style={{ flex: '2 1 0', minHeight: '250px', overflow: 'hidden' }}>
+          {/* DX Cluster - reduced size to make room for PSKReporter */}
+          <div style={{ flex: '1 1 0', minHeight: '180px', maxHeight: '220px', overflow: 'hidden' }}>
             <DXClusterPanel
               data={dxCluster.data}
               loading={dxCluster.loading}
@@ -637,13 +637,8 @@ const App = () => {
             />
           </div>
           
-          {/* DXpeditions - smaller */}
-          <div style={{ flex: '0 0 auto', maxHeight: '140px', overflow: 'hidden' }}>
-            <DXpeditionPanel data={dxpeditions.data} loading={dxpeditions.loading} />
-          </div>
-          
-          {/* PSKReporter */}
-          <div style={{ flex: '0 0 auto', maxHeight: '220px', overflow: 'hidden' }}>
+          {/* PSKReporter - where your digital signals are heard */}
+          <div style={{ flex: '1 1 0', minHeight: '180px', maxHeight: '220px', overflow: 'hidden' }}>
             <PSKReporterPanel 
               callsign={config.callsign}
               onShowOnMap={(report) => {
@@ -654,8 +649,13 @@ const App = () => {
             />
           </div>
           
-          {/* POTA - smaller */}
+          {/* DXpeditions - smaller */}
           <div style={{ flex: '0 0 auto', maxHeight: '120px', overflow: 'hidden' }}>
+            <DXpeditionPanel data={dxpeditions.data} loading={dxpeditions.loading} />
+          </div>
+          
+          {/* POTA - smaller */}
+          <div style={{ flex: '0 0 auto', maxHeight: '100px', overflow: 'hidden' }}>
             <POTAPanel 
               data={potaSpots.data} 
               loading={potaSpots.loading} 
@@ -665,7 +665,7 @@ const App = () => {
           </div>
           
           {/* Contests - smaller */}
-          <div style={{ flex: '0 0 auto', maxHeight: '150px', overflow: 'hidden' }}>
+          <div style={{ flex: '0 0 auto', maxHeight: '120px', overflow: 'hidden' }}>
             <ContestPanel data={contests.data} loading={contests.loading} />
           </div>
         </div>
