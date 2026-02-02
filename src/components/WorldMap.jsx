@@ -342,6 +342,9 @@ export const WorldMap = ({
 
     if (showSatellites && satellites && satellites.length > 0) {
       satellites.forEach(sat => {
+        const satColor = sat.color || '#00ffff';
+        const satColorDark = sat.visible ? satColor : '#446666';
+        
         // Draw orbit track if available
         if (sat.track && sat.track.length > 1) {
           // Split track into segments to handle date line crossing
@@ -364,7 +367,7 @@ export const WorldMap = ({
           segments.forEach(segment => {
             if (segment.length > 1) {
               const trackLine = L.polyline(segment, {
-                color: sat.visible ? '#00ffff' : '#006688',
+                color: sat.visible ? satColor : satColorDark,
                 weight: 2,
                 opacity: sat.visible ? 0.8 : 0.4,
                 dashArray: sat.visible ? null : '5, 5'
@@ -374,14 +377,14 @@ export const WorldMap = ({
           });
         }
         
-        // Draw footprint circle if available
-        if (sat.footprintRadius && sat.lat && sat.lon) {
+        // Draw footprint circle if available and satellite is visible
+        if (sat.footprintRadius && sat.lat && sat.lon && sat.visible) {
           const footprint = L.circle([sat.lat, sat.lon], {
             radius: sat.footprintRadius * 1000, // Convert km to meters
-            color: '#00ffff',
+            color: satColor,
             weight: 1,
             opacity: 0.5,
-            fillColor: '#00ffff',
+            fillColor: satColor,
             fillOpacity: 0.1
           }).addTo(map);
           satTracksRef.current.push(footprint);
@@ -390,7 +393,7 @@ export const WorldMap = ({
         // Add satellite marker icon
         const icon = L.divIcon({
           className: '',
-          html: `<span style="display:inline-block;background:${sat.visible ? '#00ffff' : '#006688'};color:${sat.visible ? '#000' : '#fff'};padding:4px 8px;border-radius:4px;font-size:11px;font-family:'JetBrains Mono',monospace;white-space:nowrap;border:2px solid ${sat.visible ? '#fff' : '#00aaaa'};font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.4);">🛰 ${sat.name}</span>`,
+          html: `<span style="display:inline-block;background:${sat.visible ? satColor : satColorDark};color:${sat.visible ? '#000' : '#fff'};padding:4px 8px;border-radius:4px;font-size:11px;font-family:'JetBrains Mono',monospace;white-space:nowrap;border:2px solid ${sat.visible ? '#fff' : '#666'};font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.4);">🛰 ${sat.name}</span>`,
           iconSize: null,
           iconAnchor: [0, 0]
         });
@@ -399,11 +402,12 @@ export const WorldMap = ({
           .bindPopup(`
             <b>🛰 ${sat.name}</b><br>
             <table style="font-size: 11px;">
+              <tr><td>Mode:</td><td><b>${sat.mode || 'Unknown'}</b></td></tr>
               <tr><td>Alt:</td><td>${sat.alt} km</td></tr>
               <tr><td>Az:</td><td>${sat.azimuth}°</td></tr>
               <tr><td>El:</td><td>${sat.elevation}°</td></tr>
               <tr><td>Range:</td><td>${sat.range} km</td></tr>
-              <tr><td>Status:</td><td>${sat.visible ? '<span style="color:green">Visible</span>' : '<span style="color:gray">Below horizon</span>'}</td></tr>
+              <tr><td>Status:</td><td>${sat.visible ? '<span style="color:green">✓ Visible</span>' : '<span style="color:gray">Below horizon</span>'}</td></tr>
             </table>
           `)
           .addTo(map);

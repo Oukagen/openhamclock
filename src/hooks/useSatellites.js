@@ -6,20 +6,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as satellite from 'satellite.js';
 
-// List of popular amateur radio satellites
-const AMATEUR_SATS = [
-  'ISS (ZARYA)',
-  'SO-50',
-  'AO-91',
-  'AO-92',
-  'CAS-4A',
-  'CAS-4B',
-  'XW-2A',
-  'XW-2B',
-  'JO-97',
-  'RS-44'
-];
-
 export const useSatellites = (observerLocation) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -92,54 +78,57 @@ export const useSatellites = (observerLocation) => {
           const elevation = satellite.radiansToDegrees(lookAngles.elevation);
           const rangeSat = lookAngles.rangeSat;
 
-          // Only include if above horizon or popular sat
-          const isPopular = AMATEUR_SATS.some(s => name.includes(s));
-          if (elevation > -5 || isPopular) {
-            // Calculate orbit track (past 45 min and future 45 min = 90 min total)
-            const track = [];
-            const trackMinutes = 90;
-            const stepMinutes = 1;
+          // Include all satellites we get TLE for (they're all ham sats)
+          // Calculate orbit track (past 45 min and future 45 min = 90 min total)
+          const track = [];
+          const trackMinutes = 90;
+          const stepMinutes = 1;
+          
+          for (let m = -trackMinutes/2; m <= trackMinutes/2; m += stepMinutes) {
+            const trackTime = new Date(now.getTime() + m * 60 * 1000);
+            const trackPV = satellite.propagate(satrec, trackTime);
             
-            for (let m = -trackMinutes/2; m <= trackMinutes/2; m += stepMinutes) {
-              const trackTime = new Date(now.getTime() + m * 60 * 1000);
-              const trackPV = satellite.propagate(satrec, trackTime);
-              
-              if (trackPV.position) {
-                const trackGmst = satellite.gstime(trackTime);
-                const trackGd = satellite.eciToGeodetic(trackPV.position, trackGmst);
-                const trackLat = satellite.degreesLat(trackGd.latitude);
-                const trackLon = satellite.degreesLong(trackGd.longitude);
-                track.push([trackLat, trackLon]);
-              }
+            if (trackPV.position) {
+              const trackGmst = satellite.gstime(trackTime);
+              const trackGd = satellite.eciToGeodetic(trackPV.position, trackGmst);
+              const trackLat = satellite.degreesLat(trackGd.latitude);
+              const trackLon = satellite.degreesLong(trackGd.longitude);
+              track.push([trackLat, trackLon]);
             }
-            
-            // Calculate footprint radius (visibility circle)
-            // Formula: radius = Earth_radius * arccos(Earth_radius / (Earth_radius + altitude))
-            const earthRadius = 6371; // km
-            const footprintRadius = earthRadius * Math.acos(earthRadius / (earthRadius + alt));
-
-            positions.push({
-              name,
-              lat,
-              lon,
-              alt: Math.round(alt),
-              azimuth: Math.round(azimuth),
-              elevation: Math.round(elevation),
-              range: Math.round(rangeSat),
-              visible: elevation > 0,
-              isPopular,
-              track,
-              footprintRadius: Math.round(footprintRadius)
-            });
           }
+          
+          // Calculate footprint radius (visibility circle)
+          // Formula: radius = Earth_radius * arccos(Earth_radius / (Earth_radius + altitude))
+          const earthRadius = 6371; // km
+          const footprintRadius = earthRadius * Math.acos(earthRadius / (earthRadius + alt));
+
+          positions.push({
+            name: tle.name || name,
+            lat,
+            lon,
+            alt: Math.round(alt),
+            azimuth: Math.round(azimuth),
+            elevation: Math.round(elevation),
+            range: Math.round(rangeSat),
+            visible: elevation > 0,
+            isPopular: tle.priority <= 2,
+            track,
+            footprintRadius: Math.round(footprintRadius),
+            mode: tle.mode || 'Unknown',
+            color: tle.color || '#00ffff'
+          });
         } catch (e) {
           // Skip satellites with invalid TLE
         }
       });
 
-      // Sort by elevation (highest first) and limit
-      positions.sort((a, b) => b.elevation - a.elevation);
-      setData(positions.slice(0, 15));
+      // Sort by visibility first (visible on top), then by elevation
+      positions.sort((a, b) => {
+        if (a.visible !== b.visible) return b.visible - a.visible;
+        return b.elevation - a.elevation;
+      });
+      // Show all satellites (no limit for ham sats)
+      setData(positions);
       setLoading(false);
     } catch (err) {
       console.error('Satellite calculation error:', err);
