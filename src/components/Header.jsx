@@ -77,14 +77,21 @@ export const Header = ({
       
       {/* Weather & Solar Stats */}
       <div style={{ display: 'flex', gap: '12px', fontSize: '13px', fontFamily: 'JetBrains Mono, Consolas, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
-        {localWeather?.data && (
-          <div title={`${localWeather.data.description} • Wind: ${localWeather.data.windSpeed} mph`}>
+        {localWeather?.data && (() => {
+          const t = localWeather.data.temp;
+          const unit = localWeather.data.tempUnit || 'F';
+          const tempF = unit === 'C' ? Math.round(t * 9/5 + 32) : t;
+          const tempC = unit === 'F' ? Math.round((t - 32) * 5/9) : t;
+          const windLabel = localWeather.data.windUnit || 'mph';
+          return (
+          <div title={`${localWeather.data.description} • Wind: ${localWeather.data.windSpeed} ${windLabel}`}>
             <span style={{ marginRight: '3px' }}>{localWeather.data.icon}</span>
             <span style={{ color: 'var(--accent-cyan)', fontWeight: '600' }}>
-              {localWeather.data.temp}°F/{Math.round((localWeather.data.temp - 32) * 5/9)}°C
+              {tempF}°F/{tempC}°C
             </span>
           </div>
-        )}
+          );
+        })()}
         <div>
           <span style={{ color: 'var(--text-muted)' }}>SFI </span>
           <span style={{ color: 'var(--accent-amber)', fontWeight: '700' }}>{spaceWeather?.data?.solarFlux || '--'}</span>
