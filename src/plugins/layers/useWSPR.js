@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 
 /**
- * WSPR Propagation Heatmap Plugin v1.4.2
+ * WSPR Propagation Heatmap Plugin v1.4.3
  * 
  * Advanced Features:
  * - Great circle curved path lines between transmitters and receivers
@@ -19,6 +19,7 @@ import { useState, useEffect, useRef } from 'react';
  * - Proper cleanup on disable (v1.4.1)
  * - Fixed duplicate control creation (v1.4.2)
  * - Performance optimizations (v1.4.2)
+ * - Separate opacity controls for paths and heatmap (v1.4.3)
  * - Statistics display (total stations, spots)
  * - Signal strength legend
  * 
@@ -34,7 +35,7 @@ export const metadata = {
   category: 'propagation',
   defaultEnabled: false,
   defaultOpacity: 0.7,
-  version: '1.4.2'
+  version: '1.4.3'
 };
 
 // Convert grid square to lat/lon
@@ -264,6 +265,10 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
   const [showAnimation, setShowAnimation] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
   
+  // v1.4.3 - Separate opacity controls
+  const [pathOpacity, setPathOpacity] = useState(0.7);
+  const [heatmapOpacity, setHeatmapOpacity] = useState(0.6);
+  
   // UI Controls (refs to avoid recreation)
   const legendControlRef = useRef(null);
   const statsControlRef = useRef(null);
@@ -358,7 +363,19 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
               style="width: 100%;" />
           </div>
           
+          <div style="margin-bottom: 8px; padding-top: 8px; border-top: 1px solid #555;">
+            <label style="display: block; margin-bottom: 3px;">Path Opacity: <span id="path-opacity-value">70</span>%</label>
+            <input type="range" id="wspr-path-opacity" min="10" max="100" value="70" step="5" 
+              style="width: 100%;" />
+          </div>
+          
           <div style="margin-bottom: 8px;">
+            <label style="display: block; margin-bottom: 3px;">Heatmap Opacity: <span id="heatmap-opacity-value">60</span>%</label>
+            <input type="range" id="wspr-heatmap-opacity" min="10" max="100" value="60" step="5" 
+              style="width: 100%;" />
+          </div>
+          
+          <div style="margin-bottom: 8px; padding-top: 8px; border-top: 1px solid #555;">
             <label style="display: flex; align-items: center; cursor: pointer;">
               <input type="checkbox" id="wspr-animation" checked style="margin-right: 5px;" />
               <span>Animate Paths</span>
@@ -400,6 +417,10 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       const timeSelect = document.getElementById('wspr-time-filter');
       const snrSlider = document.getElementById('wspr-snr-filter');
       const snrValue = document.getElementById('snr-value');
+      const pathOpacitySlider = document.getElementById('wspr-path-opacity');
+      const pathOpacityValue = document.getElementById('path-opacity-value');
+      const heatmapOpacitySlider = document.getElementById('wspr-heatmap-opacity');
+      const heatmapOpacityValue = document.getElementById('heatmap-opacity-value');
       const animCheck = document.getElementById('wspr-animation');
       const heatCheck = document.getElementById('wspr-heatmap');
       
@@ -409,6 +430,20 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
         snrSlider.addEventListener('input', (e) => {
           setSNRThreshold(parseInt(e.target.value));
           if (snrValue) snrValue.textContent = e.target.value;
+        });
+      }
+      if (pathOpacitySlider) {
+        pathOpacitySlider.addEventListener('input', (e) => {
+          const value = parseInt(e.target.value) / 100;
+          setPathOpacity(value);
+          if (pathOpacityValue) pathOpacityValue.textContent = e.target.value;
+        });
+      }
+      if (heatmapOpacitySlider) {
+        heatmapOpacitySlider.addEventListener('input', (e) => {
+          const value = parseInt(e.target.value) / 100;
+          setHeatmapOpacity(value);
+          if (heatmapOpacityValue) heatmapOpacityValue.textContent = e.target.value;
         });
       }
       if (animCheck) animCheck.addEventListener('change', (e) => setShowAnimation(e.target.checked));
@@ -598,7 +633,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       const path = L.polyline(pathCoords, {
         color: isBestPath ? '#00ffff' : getSNRColor(spot.snr),
         weight: isBestPath ? 4 : getLineWeight(spot.snr),
-        opacity: opacity * (isBestPath ? 0.9 : 0.6),
+        opacity: pathOpacity * (isBestPath ? 0.9 : 0.6),
         smoothFactor: 1,
         className: showAnimation ? 'wspr-animated-path' : ''
       });
@@ -633,8 +668,8 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
           fillColor: '#ff6600',
           color: '#ffffff',
           weight: 1,
-          fillOpacity: opacity * 0.8,
-          opacity: opacity
+          fillOpacity: pathOpacity * 0.8,
+          opacity: pathOpacity
         });
         txMarker.bindTooltip(`TX: ${spot.sender}`, { permanent: false, direction: 'top' });
         txMarker.addTo(map);
@@ -649,8 +684,8 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
           fillColor: '#0088ff',
           color: '#ffffff',
           weight: 1,
-          fillOpacity: opacity * 0.8,
-          opacity: opacity
+          fillOpacity: pathOpacity * 0.8,
+          opacity: pathOpacity
         });
         rxMarker.bindTooltip(`RX: ${spot.receiver}`, { permanent: false, direction: 'top' });
         rxMarker.addTo(map);
@@ -730,7 +765,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
         try { map.removeLayer(layer); } catch (e) {}
       });
     };
-  }, [enabled, wsprData, map, snrThreshold, showAnimation, timeWindow]);
+  }, [enabled, wsprData, map, pathOpacity, snrThreshold, showAnimation, timeWindow]);
 
   // Render heatmap overlay (v1.4.0)
   useEffect(() => {
@@ -801,7 +836,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       const circle = L.circle([point.lat, point.lon], {
         radius: radius * 50000, // Convert to meters for Leaflet
         fillColor: color,
-        fillOpacity: fillOpacity * opacity,
+        fillOpacity: fillOpacity * heatmapOpacity,
         color: color,
         weight: 0,
         opacity: 0
@@ -833,7 +868,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
         } catch (e) {}
       });
     };
-  }, [enabled, showHeatmap, wsprData, map, opacity, snrThreshold, heatmapLayer]);
+  }, [enabled, showHeatmap, wsprData, map, heatmapOpacity, snrThreshold, heatmapLayer]);
 
   // Cleanup controls on disable - FIX: properly remove all controls and layers
   useEffect(() => {
@@ -911,28 +946,11 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
     }
   }, [enabled, map, heatmapLayer, pathLayers, markerLayers]);
 
-  // Update opacity
-  useEffect(() => {
-    pathLayers.forEach(layer => {
-      if (layer.setStyle) {
-        layer.setStyle({ opacity: opacity * 0.6 });
-      }
-    });
-    markerLayers.forEach(layer => {
-      if (layer.setStyle) {
-        layer.setStyle({ 
-          fillOpacity: opacity * 0.8,
-          opacity: opacity
-        });
-      }
-    });
-  }, [opacity, pathLayers, markerLayers]);
-
   return {
     paths: pathLayers,
     markers: markerLayers,
     spotCount: wsprData.length,
     filteredCount: wsprData.filter(s => (s.snr || -30) >= snrThreshold).length,
-    filters: { bandFilter, timeWindow, snrThreshold, showAnimation, showHeatmap }
+    filters: { bandFilter, timeWindow, snrThreshold, showAnimation, showHeatmap, pathOpacity, heatmapOpacity }
   };
 }
