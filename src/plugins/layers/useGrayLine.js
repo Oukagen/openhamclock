@@ -103,42 +103,70 @@ function calculateSolarAltitude(date, latitude, longitude) {
 function generateTerminatorLine(date, solarAltitude = 0, numPoints = 360) {
   const points = [];
   const { declination } = calculateSolarPosition(date);
+  const decRad = declination * Math.PI / 180;
+  const altRad = solarAltitude * Math.PI / 180;
   
+  // For each longitude, calculate the latitude where the sun is at the specified altitude
   for (let i = 0; i <= numPoints; i++) {
     const lon = (i / numPoints) * 360 - 180;
-    
-    // Calculate latitude where sun is at specified altitude
     const hourAngle = calculateHourAngle(date, lon);
     const haRad = hourAngle * Math.PI / 180;
-    const decRad = declination * Math.PI / 180;
-    const altRad = solarAltitude * Math.PI / 180;
     
-    // Solve for latitude using solar altitude equation
+    // Use the solar altitude equation to solve for latitude
+    // sin(altitude) = sin(lat) * sin(dec) + cos(lat) * cos(dec) * cos(HA)
+    // Rearranging: sin(altitude) - sin(lat) * sin(dec) = cos(lat) * cos(dec) * cos(HA)
+    
+    // For terminator (altitude = 0), the equation simplifies
+    // We need to solve: tan(lat) = -tan(dec) / cos(HA)
+    
     const cosHA = Math.cos(haRad);
     const sinDec = Math.sin(decRad);
     const cosDec = Math.cos(decRad);
     const sinAlt = Math.sin(altRad);
     
-    // lat = arcsin((sin(alt) - sin(dec) * sin(lat)) / (cos(dec) * cos(lat)))
-    // Simplified: lat where sun altitude equals target
-    const numerator = sinAlt - sinDec * Math.sin(0); // approximation
-    const denominator = cosDec * cosHA;
+    // Solve using the quadratic formula or direct calculation
+    // sin(lat) = (sin(alt) - cos(lat) * cos(dec) * cos(HA)) / sin(dec)
+    
+    // Better approach: use atan2 for proper terminator calculation
+    // The terminator latitude for a given longitude is:
+    // lat = atan(-cos(HA) / tan(dec)) when dec != 0
     
     let lat;
-    if (Math.abs(denominator) < 0.001) {
-      lat = declination > 0 ? 90 : -90;
+    
+    if (Math.abs(declination) < 0.01) {
+      // Near equinox: terminator is nearly straight along equator
+      lat = 0;
     } else {
-      const tanLat = (sinAlt - sinDec * Math.sin(declination * Math.PI / 180)) / denominator;
-      lat = Math.atan(tanLat) * 180 / Math.PI;
+      // Standard case: calculate terminator latitude
+      // Formula: cos(lat) * cos(dec) * cos(HA) = -sin(lat) * sin(dec) (for altitude = 0)
+      // This gives: tan(lat) = -cos(HA) / tan(dec)
       
-      // More accurate calculation
-      const cosLat = Math.cos(lat * Math.PI / 180);
-      const sinLat = Math.sin(lat * Math.PI / 180);
-      const recalc = sinLat * sinDec + cosLat * cosDec * cosHA;
-      lat = Math.asin(Math.max(-1, Math.min(1, recalc))) * 180 / Math.PI;
+      const tanDec = Math.tan(decRad);
+      if (Math.abs(tanDec) < 0.0001) {
+        lat = 0;
+      } else {
+        lat = Math.atan(-cosHA / tanDec) * 180 / Math.PI;
+      }
+      
+      // For twilight (altitude < 0), we need to adjust
+      if (solarAltitude !== 0) {
+        // Use iterative solution for twilight calculations
+        // cos(lat) * cos(dec) * cos(HA) + sin(lat) * sin(dec) = sin(alt)
+        
+        // Newton-Raphson iteration to solve for latitude
+        let testLat = lat * Math.PI / 180;
+        for (let iter = 0; iter < 5; iter++) {
+          const f = Math.sin(testLat) * sinDec + Math.cos(testLat) * cosDec * cosHA - sinAlt;
+          const fPrime = Math.cos(testLat) * sinDec - Math.sin(testLat) * cosDec * cosHA;
+          if (Math.abs(fPrime) > 0.0001) {
+            testLat = testLat - f / fPrime;
+          }
+        }
+        lat = testLat * 180 / Math.PI;
+      }
     }
     
-    // Clamp latitude
+    // Clamp latitude to valid range
     lat = Math.max(-90, Math.min(90, lat));
     
     if (isFinite(lat) && isFinite(lon)) {
