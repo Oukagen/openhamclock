@@ -46,7 +46,8 @@ import {
   applyTheme,
   fetchServerConfig,
   calculateGridSquare,
-  calculateSunTimes
+  calculateSunTimes,
+  getBandColor
 } from './utils';
 
 const App = () => {
@@ -701,6 +702,40 @@ const App = () => {
                 hoveredSpot={hoveredSpot}
                 hideOverlays={true}
               />
+              {/* Compact Band Legend */}
+              <div style={{
+                position: 'absolute',
+                bottom: '4px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(0,0,0,0.8)',
+                border: '1px solid #444',
+                borderRadius: '4px',
+                padding: '3px 6px',
+                zIndex: 1000,
+                display: 'flex',
+                gap: '3px',
+                alignItems: 'center',
+                fontSize: '9px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: '700'
+              }}>
+                {[
+                  { band: '160', color: '#ff6666' }, { band: '80', color: '#ff9966' },
+                  { band: '40', color: '#ffcc66' }, { band: '30', color: '#99ff66' },
+                  { band: '20', color: '#66ff99' }, { band: '17', color: '#66ffcc' },
+                  { band: '15', color: '#66ccff' }, { band: '12', color: '#6699ff' },
+                  { band: '10', color: '#9966ff' }, { band: '6', color: '#ff66ff' }
+                ].map(b => (
+                  <span key={b.band} style={{
+                    background: b.color,
+                    color: '#000',
+                    padding: '1px 3px',
+                    borderRadius: '2px',
+                    lineHeight: 1.2
+                  }}>{b.band}</span>
+                ))}
+              </div>
             </div>
 
             {/* DATA SIDEBAR */}
@@ -760,7 +795,7 @@ const App = () => {
                       style={{
                         padding: '3px 8px',
                         display: 'grid',
-                        gridTemplateColumns: '70px 1fr 42px',
+                        gridTemplateColumns: '80px 1fr 52px',
                         gap: '4px',
                         borderBottom: '1px solid rgba(255,255,255,0.05)',
                         cursor: 'pointer',
@@ -770,9 +805,9 @@ const App = () => {
                       onMouseEnter={() => setHoveredSpot(spot)}
                       onMouseLeave={() => setHoveredSpot(null)}
                     >
-                      <span style={{ color: '#ffff00', fontWeight: '600' }}>{parseFloat(spot.freq).toFixed(1)}</span>
+                      <span style={{ color: getBandColor(spot.freq), fontWeight: '700' }}>{parseFloat(spot.freq).toFixed(1)}</span>
                       <span style={{ color: 'var(--accent-cyan)', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{spot.call}</span>
-                      <span style={{ color: 'var(--text-muted)', textAlign: 'right' }}>{spot.time || '--'}</span>
+                      <span style={{ color: 'var(--text-muted)', textAlign: 'right', fontSize: '12px' }}>{spot.time || '--'}</span>
                     </div>
                   ))}
                 </div>
@@ -966,7 +1001,7 @@ const App = () => {
               />
               <div style={{
                 position: 'absolute',
-                bottom: '6px',
+                bottom: '26px',
                 left: '50%',
                 transform: 'translateX(-50%)',
                 fontSize: '14px',
@@ -976,6 +1011,40 @@ const App = () => {
                 borderRadius: '4px'
               }}>
                 {deGrid} → {dxGrid} • Click map to set DX
+              </div>
+              {/* Compact Band Legend */}
+              <div style={{
+                position: 'absolute',
+                bottom: '4px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(0,0,0,0.8)',
+                border: '1px solid #444',
+                borderRadius: '4px',
+                padding: '3px 6px',
+                zIndex: 1000,
+                display: 'flex',
+                gap: '3px',
+                alignItems: 'center',
+                fontSize: '9px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: '700'
+              }}>
+                {[
+                  { band: '160', color: '#ff6666' }, { band: '80', color: '#ff9966' },
+                  { band: '40', color: '#ffcc66' }, { band: '30', color: '#99ff66' },
+                  { band: '20', color: '#66ff99' }, { band: '17', color: '#66ffcc' },
+                  { band: '15', color: '#66ccff' }, { band: '12', color: '#6699ff' },
+                  { band: '10', color: '#9966ff' }, { band: '6', color: '#ff66ff' }
+                ].map(b => (
+                  <span key={b.band} style={{
+                    background: b.color,
+                    color: '#000',
+                    padding: '1px 3px',
+                    borderRadius: '2px',
+                    lineHeight: 1.2
+                  }}>{b.band}</span>
+                ))}
               </div>
             </div>
 
@@ -1000,7 +1069,7 @@ const App = () => {
                     style={{
                       padding: '3px 8px',
                       display: 'grid',
-                      gridTemplateColumns: '65px 1fr 38px',
+                      gridTemplateColumns: '75px 1fr 50px',
                       gap: '4px',
                       borderBottom: '1px solid rgba(255,255,255,0.05)',
                       cursor: 'pointer',
@@ -1010,9 +1079,9 @@ const App = () => {
                     onMouseEnter={() => setHoveredSpot(spot)}
                     onMouseLeave={() => setHoveredSpot(null)}
                   >
-                    <span style={{ color: '#ffff00', fontWeight: '600' }}>{parseFloat(spot.freq).toFixed(1)}</span>
+                    <span style={{ color: getBandColor(spot.freq), fontWeight: '700' }}>{parseFloat(spot.freq).toFixed(1)}</span>
                     <span style={{ color: 'var(--accent-cyan)', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{spot.call}</span>
-                    <span style={{ color: 'var(--text-muted)', textAlign: 'right' }}>{spot.time || '--'}</span>
+                    <span style={{ color: 'var(--text-muted)', textAlign: 'right', fontSize: '12px' }}>{spot.time || '--'}</span>
                   </div>
                 ))}
               </div>
