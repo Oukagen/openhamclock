@@ -837,6 +837,21 @@ sudo systemctl restart openhamclock
 ./restart.sh
 ```
 
+### Auto-update (Git installations):
+
+Enable automatic updates by setting the following in `.env`:
+
+```
+AUTO_UPDATE_ENABLED=true
+AUTO_UPDATE_INTERVAL_MINUTES=60
+AUTO_UPDATE_ON_START=false
+AUTO_UPDATE_EXIT_AFTER=true
+```
+
+When enabled, OpenHamClock periodically checks GitHub for updates and runs `./scripts/update.sh --auto`. After a successful update it exits so a supervisor (systemd/pm2) can restart it. If you're running in a terminal, you'll need to restart manually.
+
+On local installs, you can also click the **UPDATE** button in the header to start the update process on demand.
+
 ### Zip file installations:
 
 1. Back up your `.env` file
