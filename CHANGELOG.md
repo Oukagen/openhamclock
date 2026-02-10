@@ -2,7 +2,7 @@
 
 All notable changes to OpenHamClock will be documented in this file.
 
-## [15.1.6] - 2026-02-09
+## [15.1.7] - 2026-02-09
 
 ### Added
 - **Upstream Request Manager** — New `UpstreamManager` class prevents request stampedes on external APIs. Three-layer protection: (1) in-flight request deduplication — 50 concurrent users trigger 1 upstream fetch, not 50; (2) stale-while-revalidate — serve cached data instantly while refreshing in background; (3) exponential backoff with jitter per service. Applied to PSKReporter HTTP, WSPR Heatmap, and weather endpoints
