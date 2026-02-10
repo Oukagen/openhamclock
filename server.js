@@ -353,6 +353,12 @@ app.use('/api', (req, res, next) => {
     return next();
   }
   
+  // Settings must always be fresh (multi-device sync)
+  if (req.path.includes('/settings')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return next();
+  }
+  
   // Determine cache duration based on endpoint
   let cacheDuration = 30; // Default: 30 seconds
   
@@ -4459,7 +4465,7 @@ app.get('/api/wspr/heatmap', async (req, res) => {
     
     const response = await fetch(url, {
       headers: { 
-        'User-Agent': 'OpenHamClock/15.1.8 (Amateur Radio Dashboard)',
+        'User-Agent': 'OpenHamClock/15.1.9 (Amateur Radio Dashboard)',
         'Accept': '*/*'
       },
       signal: controller.signal
@@ -6870,6 +6876,106 @@ app.get('/api/version', (req, res) => {
   res.json({ version: APP_VERSION });
 });
 
+// ============================================
+// USER SETTINGS SYNC (SERVER-SIDE PERSISTENCE)
+// ============================================
+// Stores all UI settings (layout, panels, filters, etc.) on the server
+// so they persist across all devices accessing the same OHC instance.
+// ONLY for self-hosted/Pi deployments — disabled by default.
+// Enable with SETTINGS_SYNC=true in .env
+// On multi-user hosted deployments (openhamclock.com), leave disabled —
+// settings stay in each user's browser localStorage.
+
+const SETTINGS_SYNC_ENABLED = (process.env.SETTINGS_SYNC || '').toLowerCase() === 'true';
+
+function getSettingsFilePath() {
+  if (!SETTINGS_SYNC_ENABLED) return null;
+  // Same directory strategy as stats file
+  const pathsToTry = [
+    process.env.SETTINGS_FILE,
+    '/data/settings.json',
+    path.join(__dirname, 'data', 'settings.json'),
+    '/tmp/openhamclock-settings.json'
+  ].filter(Boolean);
+  
+  for (const settingsPath of pathsToTry) {
+    try {
+      const dir = path.dirname(settingsPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      // Test write permission
+      const testFile = path.join(dir, '.settings-test-' + Date.now());
+      fs.writeFileSync(testFile, 'test');
+      fs.unlinkSync(testFile);
+      return settingsPath;
+    } catch {}
+  }
+  return null;
+}
+
+const SETTINGS_FILE = getSettingsFilePath();
+if (SETTINGS_SYNC_ENABLED && SETTINGS_FILE) logInfo(`[Settings] ✓ Sync enabled, using: ${SETTINGS_FILE}`);
+else if (SETTINGS_SYNC_ENABLED) logWarn('[Settings] Sync enabled but no writable path found');
+else logInfo('[Settings] Sync disabled (set SETTINGS_SYNC=true in .env to enable)');
+
+function loadServerSettings() {
+  if (!SETTINGS_SYNC_ENABLED || !SETTINGS_FILE) return null;
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    }
+  } catch (e) {
+    logWarn('[Settings] Failed to load:', e.message);
+  }
+  return {};
+}
+
+function saveServerSettings(settings) {
+  if (!SETTINGS_SYNC_ENABLED || !SETTINGS_FILE) return false;
+  try {
+    const dir = path.dirname(SETTINGS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    return true;
+  } catch (e) {
+    logWarn('[Settings] Failed to save:', e.message);
+    return false;
+  }
+}
+
+// GET /api/settings — return saved UI settings (or 404 if sync disabled)
+app.get('/api/settings', (req, res) => {
+  if (!SETTINGS_SYNC_ENABLED) {
+    return res.status(404).json({ enabled: false });
+  }
+  const settings = loadServerSettings();
+  res.json(settings || {});
+});
+
+// POST /api/settings — save UI settings (or 404 if sync disabled)
+app.post('/api/settings', (req, res) => {
+  if (!SETTINGS_SYNC_ENABLED) {
+    return res.status(404).json({ enabled: false });
+  }
+  const settings = req.body;
+  if (!settings || typeof settings !== 'object') {
+    return res.status(400).json({ error: 'Invalid settings object' });
+  }
+  
+  // Only allow openhamclock_* and ohc_* keys (security: prevent arbitrary data injection)
+  const filtered = {};
+  for (const [key, value] of Object.entries(settings)) {
+    if ((key.startsWith('openhamclock_') || key.startsWith('ohc_')) && typeof value === 'string') {
+      filtered[key] = value;
+    }
+  }
+  
+  if (saveServerSettings(filtered)) {
+    res.json({ ok: true, keys: Object.keys(filtered).length });
+  } else {
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
 // Serve station configuration to frontend
 // This allows the frontend to get config from .env/config.json without exposing secrets
 app.get('/api/config', (req, res) => {
@@ -6920,6 +7026,7 @@ app.get('/api/config', (req, res) => {
       contests: true,
       dxpeditions: true,
       wsjtxRelay: !!WSJTX_RELAY_KEY,
+      settingsSync: SETTINGS_SYNC_ENABLED,
     },
     
     // Refresh intervals (ms)
