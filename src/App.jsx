@@ -19,6 +19,7 @@ import {
   useBandConditions,
   useDXClusterData,
   usePOTASpots,
+  useSOTASpots,
   useContests,
   useWeather,
   usePropagation,
@@ -110,6 +111,7 @@ const App = () => {
     toggleDXPaths,
     toggleDXLabels,
     togglePOTA,
+    toggleSOTA,
     toggleSatellites,
     togglePSKReporter,
     toggleWSJTX,
@@ -133,6 +135,7 @@ const App = () => {
   const bandConditions = useBandConditions();
   const solarIndices = useSolarIndices();
   const potaSpots = usePOTASpots();
+  const sotaSpots = useSOTASpots();
   const dxClusterData = useDXClusterData(dxFilters, config);
   const dxpeditions = useDXpeditions();
   const contests = useContests();
@@ -140,6 +143,7 @@ const App = () => {
   const mySpots = useMySpots(config.callsign);
   const satellites = useSatellites(config.location);
   const localWeather = useWeather(config.location, tempUnit);
+  const dxWeather = useWeather(dxLocation, tempUnit);
   const pskReporter = usePSKReporter(config.callsign, {
     minutes: config.lowMemoryMode ? 5 : 30,
     enabled: config.callsign !== 'N0CALL',
@@ -187,7 +191,14 @@ const App = () => {
   }, [pskReporter.txReports, pskReporter.rxReports, pskFilters]);
 
   const wsjtxMapSpots = useMemo(() => {
-    return wsjtx.decodes.filter(d => d.lat && d.lon && d.type === 'CQ');
+    // Apply same age filter as panel (stored in localStorage)
+    let ageMinutes = 30;
+    try { ageMinutes = parseInt(localStorage.getItem('ohc_wsjtx_age')) || 30; } catch {}
+    const ageCutoff = Date.now() - ageMinutes * 60 * 1000;
+    
+    // Map all decodes with resolved coordinates (CQ, QSO exchanges, prefix estimates)
+    // WorldMap deduplicates by callsign, keeping most recent
+    return wsjtx.decodes.filter(d => d.lat && d.lon && d.timestamp >= ageCutoff);
   }, [wsjtx.decodes]);
 
   // Map hover
@@ -245,12 +256,14 @@ const App = () => {
     tempUnit,
     setTempUnit,
     localWeather,
+    dxWeather,
     spaceWeather,
     solarIndices,
     bandConditions,
     propagation,
     dxClusterData,
     potaSpots,
+    sotaSpots,
     mySpots,
     dxpeditions,
     contests,
@@ -267,6 +280,7 @@ const App = () => {
     toggleDXPaths,
     toggleDXLabels,
     togglePOTA,
+    toggleSOTA,
     toggleSatellites,
     togglePSKReporter,
     toggleWSJTX,

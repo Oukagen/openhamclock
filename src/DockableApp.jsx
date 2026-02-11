@@ -11,6 +11,7 @@ import {
   WorldMap,
   DXClusterPanel,
   POTAPanel,
+  SOTAPanel,
   ContestPanel,
   SolarPanel,
   PropagationPanel,
@@ -19,14 +20,15 @@ import {
   PSKReporterPanel,
   WeatherPanel,
   AmbientPanel,
-
   AnalogClockPanel,
   RigControlPanel,
-  OnAirPanel
+  OnAirPanel,
+  IDTimerPanel
 } from './components';
 
 import { loadLayout, saveLayout, DEFAULT_LAYOUT } from './store/layoutStore.js';
 import { DockableLayoutProvider } from './contexts';
+import { useRig } from './contexts/RigContext.jsx';
 import './styles/flexlayout-openhamclock.css';
 
 // Icons
@@ -53,6 +55,7 @@ export const DockableApp = ({
 
   // Weather
   localWeather,
+  dxWeather,
   tempUnit,
   setTempUnit,
   showDxWeather,
@@ -66,10 +69,12 @@ export const DockableApp = ({
   // Spots & data
   dxClusterData,
   potaSpots,
+  sotaSpots,
   mySpots,
   dxpeditions,
   contests,
   satellites,
+  filteredSatellites,
   pskReporter,
   wsjtx,
   filteredPskSpots,
@@ -87,6 +92,7 @@ export const DockableApp = ({
   toggleDXPaths,
   toggleDXLabels,
   togglePOTA,
+  toggleSOTA,
   toggleSatellites,
   togglePSKReporter,
   toggleWSJTX,
@@ -142,6 +148,35 @@ export const DockableApp = ({
     });
   }, []);
 
+  // Rig Control Hook
+  const { tuneTo, enabled } = useRig();
+
+  // Unified Spot Click Handler (Tune + Set DX)
+  const handleSpotClick = useCallback((spot) => {
+    if (!spot) return;
+
+    // 1. Tune Rig if frequency is available and rig control is enabled
+    // Spot freq is usually in kHz or MHz string
+    if (enabled && (spot.freq || spot.freqMHz)) {
+      const freq = spot.freq || (parseFloat(spot.freqMHz) * 1000); // Normalize to kHz for tuneTo (which handles units)
+      // tuneTo handles unit detection (MHz vs kHz vs Hz) so just pass the raw value
+      tuneTo(spot.freq || spot.freqMHz, spot.mode);
+    }
+
+    // 2. Set DX Location if location data is available
+    // For DX Cluster spots, we need to find the path data which contains coordinates
+    // For POTA/SOTA, the spot object itself has lat/lon
+    if (spot.lat && spot.lon) {
+      handleDXChange({ lat: spot.lat, lon: spot.lon });
+    } else if (spot.call) {
+      // Try to find in DX Cluster paths
+      const path = (dxClusterData.paths || []).find(p => p.dxCall === spot.call);
+      if (path && path.dxLat != null && path.dxLon != null) {
+        handleDXChange({ lat: path.dxLat, lon: path.dxLon });
+      }
+    }
+  }, [tuneTo, enabled, handleDXChange, dxClusterData.paths]);
+
   const resetZoom = useCallback((component) => {
     setPanelZoom(prev => {
       const { [component]: _, ...rest } = prev;
@@ -184,10 +219,12 @@ export const DockableApp = ({
     'psk-reporter': { name: 'PSK Reporter', icon: '📡' },
     'dxpeditions': { name: 'DXpeditions', icon: '🏝️' },
     'pota': { name: 'POTA', icon: '🏕️' },
+    'sota': { name: 'SOTA', icon: '⛰️' },
     'contests': { name: 'Contests', icon: '🏆' },
     'ambient': { name: 'Ambient Weather', icon: '🌦️' },
     'rig-control': { name: 'Rig Control', icon: '📻' },
     'on-air': { name: 'On Air', icon: '🔴' },
+    'id-timer': { name: 'ID Timer', icon: '📢' },
   }), []);
 
   // Add panel
@@ -216,7 +253,7 @@ export const DockableApp = ({
       </div>
 
       <WeatherPanel
-        location={config.location}
+        weatherData={localWeather}
         tempUnit={tempUnit}
         onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch { } }}
         nodeId={nodeId}
@@ -263,7 +300,7 @@ export const DockableApp = ({
       </div>
       {showDxWeather && (
         <WeatherPanel
-          location={dxLocation}
+          weatherData={dxWeather}
           tempUnit={tempUnit}
           onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch { } }}
           nodeId={nodeId}
@@ -281,15 +318,17 @@ export const DockableApp = ({
         onDXChange={handleDXChange}
         dxLocked={dxLocked}
         potaSpots={potaSpots.data}
+        sotaSpots={sotaSpots.data}
         mySpots={mySpots.data}
         dxPaths={dxClusterData.paths}
         dxFilters={dxFilters}
-        satellites={satellites.data}
+        satellites={filteredSatellites}
         pskReporterSpots={filteredPskSpots}
         showDXPaths={mapLayers.showDXPaths}
         showDXLabels={mapLayers.showDXLabels}
         onToggleDXLabels={toggleDXLabels}
         showPOTA={mapLayers.showPOTA}
+        showSOTA={mapLayers.showSOTA}
         showSatellites={mapLayers.showSatellites}
         showPSKReporter={mapLayers.showPSKReporter}
         wsjtxSpots={wsjtxMapSpots}
@@ -302,6 +341,7 @@ export const DockableApp = ({
         callsign={config.callsign}
         lowMemoryMode={config.lowMemoryMode}
         units={config.units}
+        onSpotClick={handleSpotClick}
       />
     </div>
   );
@@ -382,12 +422,7 @@ export const DockableApp = ({
             onFilterChange={setDxFilters}
             onOpenFilters={() => setShowDXFilters(true)}
             onHoverSpot={setHoveredSpot}
-            onSpotClick={(spot) => {
-              const path = (dxClusterData.paths || []).find(p => p.dxCall === spot.call);
-              if (path && path.dxLat != null && path.dxLon != null) {
-                handleDXChange({ lat: path.dxLat, lon: path.dxLon });
-              }
-            }}
+            onSpotClick={handleSpotClick}
             hoveredSpot={hoveredSpot}
             showOnMap={mapLayers.showDXPaths}
             onToggleMap={toggleDXPaths}
@@ -432,6 +467,10 @@ export const DockableApp = ({
         content = <POTAPanel data={potaSpots.data} loading={potaSpots.loading} showOnMap={mapLayers.showPOTA} onToggleMap={togglePOTA} />;
         break;
 
+      case 'sota':
+        content = <SOTAPanel data={sotaSpots.data} loading={sotaSpots.loading} showOnMap={mapLayers.showSOTA} onToggleMap={toggleSOTA} />;
+        break;
+
       case 'contests':
         content = <ContestPanel data={contests.data} loading={contests.loading} />;
         break;
@@ -444,7 +483,6 @@ export const DockableApp = ({
               setTempUnit(unit);
               try { localStorage.setItem('openhamclock_tempUnit', unit); } catch { }
             }}
-            nodeId={nodeId}
           />
         );
         break;
@@ -455,6 +493,10 @@ export const DockableApp = ({
 
       case 'on-air':
         content = <OnAirPanel />;
+        break;
+
+      case 'id-timer':
+        content = <IDTimerPanel callsign={config.callsign} />;
         break;
 
       default:
@@ -477,11 +519,11 @@ export const DockableApp = ({
     }
     return content;
   }, [
-    config, deGrid, dxGrid, dxLocation, deSunTimes, dxSunTimes, showDxWeather, tempUnit, solarIndices,
-    propagation, bandConditions, dxClusterData, dxFilters, hoveredSpot, mapLayers, potaSpots,
-    mySpots, satellites, filteredPskSpots, wsjtxMapSpots, dxpeditions, contests,
+    config, deGrid, dxGrid, dxLocation, deSunTimes, dxSunTimes, showDxWeather, tempUnit, localWeather, dxWeather, solarIndices,
+    propagation, bandConditions, dxClusterData, dxFilters, hoveredSpot, mapLayers, potaSpots, sotaSpots,
+    mySpots, satellites, filteredSatellites, filteredPskSpots, wsjtxMapSpots, dxpeditions, contests,
     pskFilters, wsjtx, handleDXChange, setDxFilters, setShowDXFilters, setShowPSKFilters,
-    setHoveredSpot, toggleDXPaths, toggleDXLabels, togglePOTA, toggleSatellites, togglePSKReporter, toggleWSJTX,
+    setHoveredSpot, toggleDXPaths, toggleDXLabels, togglePOTA, toggleSOTA, toggleSatellites, togglePSKReporter, toggleWSJTX,
     dxLocked, handleToggleDxLock, panelZoom
   ]);
 

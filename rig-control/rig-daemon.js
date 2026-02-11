@@ -82,6 +82,15 @@ const state = {
   lastUpdate: 0
 };
 
+// SSE Clients
+let clients = [];
+
+// Broadcast helper
+const broadcast = (data) => {
+  const msg = `data: ${JSON.stringify(data)}\n\n`;
+  clients.forEach(c => c.res.write(msg));
+};
+
 // Interface Definition
 const RIG = {
   connect: () => { },
@@ -162,13 +171,27 @@ const RigaAdapter = {
     RigaAdapter.pending = null;
 
     if (req.cmd === 'f' || req.cmd.startsWith('F')) {
-      state.freq = parseInt(line);
+      const newFreq = parseInt(line);
+      if (newFreq !== state.freq) {
+        state.freq = newFreq;
+        broadcast({ type: 'update', prop: 'freq', value: state.freq });
+      }
     } else if (req.cmd === 'm' || req.cmd.startsWith('M')) {
       const parts = line.split(' ');
-      state.mode = parts[0];
-      state.width = parseInt(parts[1] || '0');
+      const newMode = parts[0];
+      const newWidth = parseInt(parts[1] || '0');
+
+      if (newMode !== state.mode || newWidth !== state.width) {
+        state.mode = newMode;
+        state.width = newWidth;
+        broadcast({ type: 'update', prop: 'mode', value: state.mode });
+      }
     } else if (req.cmd === 't' || req.cmd.startsWith('T')) {
-      state.ptt = (line === '1');
+      const newPTT = (line === '1');
+      if (newPTT !== state.ptt) {
+        state.ptt = newPTT;
+        broadcast({ type: 'update', prop: 'ptt', value: state.ptt });
+      }
     }
 
     if (req.cb) req.cb(null, line);
@@ -208,18 +231,34 @@ const FlrigAdapter = {
         if (state.connected) console.error('[Flrig] Poll Error:', err.message);
         state.connected = false;
       } else {
-        state.connected = true;
-        state.freq = parseFloat(val);
+        if (!state.connected) {
+          state.connected = true;
+          broadcast({ type: 'update', prop: 'connected', value: true });
+        }
+        const newFreq = parseFloat(val);
+        if (newFreq !== state.freq) {
+          state.freq = newFreq;
+          broadcast({ type: 'update', prop: 'freq', value: state.freq });
+        }
         state.lastUpdate = Date.now();
       }
     });
     // Get Mode
     FlrigAdapter.client.methodCall('rig.get_mode', [], (err, val) => {
-      if (!err) state.mode = val;
+      if (!err && val !== state.mode) {
+        state.mode = val;
+        broadcast({ type: 'update', prop: 'mode', value: state.mode });
+      }
     });
     // Get PTT
     FlrigAdapter.client.methodCall('rig.get_ptt', [], (err, val) => {
-      if (!err) state.ptt = !!val;
+      if (!err) {
+        const newPTT = !!val;
+        if (newPTT !== state.ptt) {
+          state.ptt = newPTT;
+          broadcast({ type: 'update', prop: 'ptt', value: state.ptt });
+        }
+      }
     });
   },
 
@@ -292,18 +331,21 @@ const MockAdapter = {
   setFreq: (freq, cb) => {
     console.log(`[Mock] SET FREQ: ${freq}`);
     state.freq = parseInt(freq);
+    broadcast({ type: 'update', prop: 'freq', value: state.freq });
     if (cb) cb(null);
   },
 
   setMode: (mode, cb) => {
     console.log(`[Mock] SET MODE: ${mode}`);
     state.mode = mode;
+    broadcast({ type: 'update', prop: 'mode', value: state.mode });
     if (cb) cb(null);
   },
 
   setPTT: (ptt, cb) => {
     console.log(`[Mock] SET PTT: ${ptt}`);
     state.ptt = !!ptt;
+    broadcast({ type: 'update', prop: 'ptt', value: state.ptt });
     if (cb) cb(null);
   },
 
@@ -342,6 +384,37 @@ app.get('/status', (req, res) => {
     width: state.width,
     ptt: state.ptt,
     timestamp: state.lastUpdate
+  });
+});
+
+app.get('/stream', (req, res) => {
+  // SSE Headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+
+  // Send initial state
+  const initialData = {
+    type: 'init',
+    connected: state.connected,
+    freq: state.freq,
+    mode: state.mode,
+    width: state.width,
+    ptt: state.ptt
+  };
+  res.write(`data: ${JSON.stringify(initialData)}\n\n`);
+
+  // Add client
+  const clientId = Date.now();
+  const newClient = { id: clientId, res };
+  clients.push(newClient);
+
+  // Cleanup on close
+  req.on('close', () => {
+    clients = clients.filter(c => c.id !== clientId);
   });
 });
 

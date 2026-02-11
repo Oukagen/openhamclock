@@ -38,8 +38,10 @@ export default function ClassicLayout(props) {
     bandConditions,
     propagation,
     potaSpots,
+    sotaSpots,
     mySpots,
     satellites,
+    filteredSatellites,
     mapLayers,
     dxFilters,
     filteredPskSpots,
@@ -266,15 +268,17 @@ export default function ClassicLayout(props) {
             onDXChange={handleDXChange}
             dxLocked={dxLocked}
             potaSpots={potaSpots.data}
+            sotaSpots={sotaSpots.data}
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
             dxFilters={dxFilters}
-            satellites={satellites.data}
+            satellites={filteredSatellites}
             pskReporterSpots={filteredPskSpots}
             showDXPaths={mapLayers.showDXPaths}
             showDXLabels={mapLayers.showDXLabels}
             onToggleDXLabels={toggleDXLabels}
             showPOTA={mapLayers.showPOTA}
+            showSOTA={mapLayers.showSOTA}
             showSatellites={mapLayers.showSatellites}
             showPSKReporter={mapLayers.showPSKReporter}
             wsjtxSpots={wsjtxMapSpots}
@@ -503,15 +507,17 @@ export default function ClassicLayout(props) {
             onDXChange={handleDXChange}
             dxLocked={dxLocked}
             potaSpots={potaSpots.data}
+            sotaSpots={sotaSpots.data}
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
             dxFilters={dxFilters}
-            satellites={satellites.data}
+            satellites={filteredSatellites}
             pskReporterSpots={filteredPskSpots}
             showDXPaths={mapLayers.showDXPaths}
             showDXLabels={mapLayers.showDXLabels}
             onToggleDXLabels={toggleDXLabels}
             showPOTA={mapLayers.showPOTA}
+            showSOTA={mapLayers.showSOTA}
             showSatellites={mapLayers.showSatellites}
             showPSKReporter={mapLayers.showPSKReporter}
             wsjtxSpots={wsjtxMapSpots}
@@ -877,15 +883,17 @@ export default function ClassicLayout(props) {
             onDXChange={handleDXChange}
             dxLocked={dxLocked}
             potaSpots={potaSpots.data}
+            sotaSpots={sotaSpots.data}
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
             dxFilters={dxFilters}
-            satellites={satellites.data}
+            satellites={filteredSatellites}
             pskReporterSpots={filteredPskSpots}
             showDXPaths={mapLayers.showDXPaths}
             showDXLabels={mapLayers.showDXLabels}
             onToggleDXLabels={toggleDXLabels}
             showPOTA={mapLayers.showPOTA}
+            showSOTA={mapLayers.showSOTA}
             showSatellites={mapLayers.showSatellites}
             showPSKReporter={mapLayers.showPSKReporter}
             wsjtxSpots={wsjtxMapSpots}

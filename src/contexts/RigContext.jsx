@@ -5,7 +5,6 @@ import { getModeFromFreq, mapModeToRig } from '../utils/bandPlan.js';
 // Default config
 // Default config (fallback)
 const DEFAULT_RIG_URL = 'http://localhost:5555';
-const POLL_INTERVAL = 1000;
 
 
 const RigContext = createContext(null);
@@ -35,39 +34,74 @@ export const RigProvider = ({ children, rigConfig }) => {
         ? `${rigConfig.host}:${rigConfig.port}`
         : DEFAULT_RIG_URL;
 
-    // Poll Daemon
-    const pollRig = useCallback(async () => {
+    // Connect to SSE Stream
+    useEffect(() => {
         if (rigConfig && !rigConfig.enabled) {
             setRigState(prev => ({ ...prev, connected: false }));
             return;
         }
 
-        try {
-            const resp = await fetch(`${rigUrl}/status`);
-            if (!resp.ok) throw new Error('Daemon unreachable');
+        let eventSource = null;
+        let retryTimeout = null;
 
-            const data = await resp.json();
-            setRigState(prev => ({
-                ...prev,
-                connected: data.connected,
-                freq: data.freq,
-                mode: data.mode,
-                ptt: data.ptt,
-                width: data.width,
-                lastUpdate: Date.now()
-            }));
-            setError(null);
-        } catch (err) {
-            setError(err.message);
-            setRigState(prev => ({ ...prev, connected: false }));
-        }
-    }, []);
+        const connectSSE = () => {
+            // Construct URL from config or default
+            const rigUrl = rigConfig && rigConfig.host && rigConfig.port
+                ? `${rigConfig.host}:${rigConfig.port}`
+                : DEFAULT_RIG_URL;
 
-    // Set Interval
-    useEffect(() => {
-        const timer = setInterval(pollRig, POLL_INTERVAL);
-        return () => clearInterval(timer);
-    }, [pollRig]);
+            // console.log('[RigContext] Connecting to SSE stream...', `${rigUrl}/stream`);
+            eventSource = new EventSource(`${rigUrl}/stream`);
+
+            eventSource.onopen = () => {
+                // console.log('[RigContext] SSE Connected');
+                setError(null);
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'init') {
+                        setRigState(prev => ({
+                            ...prev,
+                            connected: data.connected,
+                            freq: data.freq,
+                            mode: data.mode,
+                            width: data.width,
+                            ptt: data.ptt,
+                            lastUpdate: Date.now()
+                        }));
+                    } else if (data.type === 'update') {
+                        setRigState(prev => ({
+                            ...prev,
+                            [data.prop]: data.value,
+                            lastUpdate: Date.now()
+                        }));
+                    }
+                } catch (e) {
+                    console.error('[RigContext] Failed to parse SSE message', e);
+                }
+            };
+
+            eventSource.onerror = (err) => {
+                // console.error('[RigContext] SSE Error', err);
+                eventSource.close();
+                setRigState(prev => ({ ...prev, connected: false }));
+                setError('Connection lost');
+
+                // Retry in 5s
+                retryTimeout = setTimeout(connectSSE, 5000);
+            };
+        };
+
+        connectSSE();
+
+        return () => {
+            if (eventSource) eventSource.close();
+            if (retryTimeout) clearTimeout(retryTimeout);
+        };
+    }, [rigConfig]);
 
     // Command: Set Frequency
     const setFreq = useCallback(async (freq) => {
@@ -78,12 +112,11 @@ export const RigProvider = ({ children, rigConfig }) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ freq, tune: rigConfig.tuneEnabled })
             });
-            // Poll immediately to update UI
-            pollRig();
+            // No need to poll, SSE will push update
         } catch (err) {
             console.error('Failed to set freq:', err);
         }
-    }, [pollRig, rigUrl, rigConfig]);
+    }, [rigUrl, rigConfig]);
 
     // Command: Set Mode
     const setMode = useCallback(async (mode) => {
@@ -94,11 +127,11 @@ export const RigProvider = ({ children, rigConfig }) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ mode })
             });
-            pollRig();
+            // SSE will push update
         } catch (err) {
             console.error('Failed to set mode:', err);
         }
-    }, [pollRig, rigUrl, rigConfig]);
+    }, [rigUrl, rigConfig]);
 
     // Command: PTT
     const setPTT = useCallback(async (enabled) => {
@@ -112,13 +145,13 @@ export const RigProvider = ({ children, rigConfig }) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ptt: enabled })
             });
-            pollRig();
+            // SSE will push update
         } catch (err) {
             console.error('Failed to set PTT:', err);
-            // Revert on error (or just let next poll fix it)
-            pollRig();
+            // Revert optimistic update?
+            // setRigState(prev => ({ ...prev, ptt: !enabled }));
         }
-    }, [pollRig]);
+    }, [rigUrl, rigConfig]);
 
     // Helper: Tune To Frequency (Centralized Logic)
     const tuneTo = useCallback((freqInput, modeInput = null) => {
