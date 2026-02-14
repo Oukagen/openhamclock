@@ -7,10 +7,10 @@ export default function useMapLayers() {
   const [mapLayers, setMapLayers] = useState(() => {
     try {
       const stored = localStorage.getItem('openhamclock_mapLayers');
-      const defaults = { showDXPaths: true, showDXLabels: true, showPOTA: true, showSOTA: true, showSatellites: false, showPSKReporter: true, showWSJTX: true, showDXNews: true };
+      const defaults = { showDXPaths: true, showDXLabels: true, showPOTA: true, showSOTA: true, showWWFF: true, showSatellites: false, showPSKReporter: true, showWSJTX: true, showDXNews: true };
       return stored ? { ...defaults, ...JSON.parse(stored) } : defaults;
     } catch (e) {
-      return { showDXPaths: true, showDXLabels: true, showPOTA: true, showSOTA: true, showSatellites: false, showPSKReporter: true, showWSJTX: true, showDXNews: true };
+      return { showDXPaths: true, showDXLabels: true, showPOTA: true, showSOTA: true, showWWFF: true, showSatellites: false, showPSKReporter: true, showWSJTX: true, showDXNews: true };
     }
   });
 

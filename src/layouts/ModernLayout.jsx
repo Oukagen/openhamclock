@@ -289,6 +289,7 @@ export default function ModernLayout(props) {
           showDXLabels={mapLayers.showDXLabels}
           onToggleDXLabels={toggleDXLabels}
           showPOTA={mapLayers.showPOTA}
+          showWWFF={mapLayers.showWWFF}
           showSOTA={mapLayers.showSOTA}
           showSatellites={mapLayers.showSatellites}
           showPSKReporter={mapLayers.showPSKReporter}
