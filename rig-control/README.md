@@ -111,6 +111,41 @@ The daemon listens on port `5555` (configurable) and provides the following endp
 - **CORS Errors**: The daemon enables CORS for all origins by default (`*`) to allow local development.
 - **Port Conflicts**: If port 5555 is in use, change `server.port` in `rig-config.json`.
 
+### Mixed Content Issues (HTTPS → HTTP)
+
+**Problem:** If OpenHamClock is accessed via **HTTPS** (e.g., `https://yourdomain.com` or `https://localhost:3000`), browsers will block HTTP requests to the rig daemon (`http://localhost:5555`) due to **Mixed Content** security policies.
+
+**Browser Behavior:**
+
+| Browser | Behavior | Workaround |
+|---------|----------|------------|
+| **Safari (macOS/iOS)** | ❌ **Strictly blocks** all mixed content. No override option. | Must use proxy solution (see below) |
+| **Chrome** | ⚠️ Blocks by default. Shows shield icon in address bar to allow insecure content. | Click shield icon → "Load unsafe scripts" |
+| **Firefox** | ⚠️ Blocks by default. Shows shield icon in address bar. | Click shield icon → "Disable protection for this session" |
+| **Edge** | ⚠️ Blocks by default. Similar to Chrome. | Click shield icon → Allow |
+
+**Solutions:**
+
+1. **Use HTTP for OpenHamClock** (Development only):
+   ```bash
+   # Access via http://localhost:3000 instead of https://
+   ```
+   ⚠️ Not recommended for production/remote access.
+
+2. **Use the Internal Proxy** (Recommended):
+   - OpenHamClock can proxy rig daemon requests through its main HTTPS server
+   - In Settings → Rig Control, enable "Use Internal Proxy"
+   - This routes all rig control through the same HTTPS origin
+   - Works on all browsers including Safari
+
+3. **Run Rig Daemon with HTTPS** (Advanced):
+   - Configure the rig daemon to use SSL/TLS certificates
+   - Requires self-signed cert setup and browser trust configuration
+   - Not recommended for local-only setups
+
+**Recommendation:** For remote/HTTPS deployments, use the **Internal Proxy** feature in OpenHamClock Settings. For local development over HTTP, direct connection works fine.
+
+
 ## Experimental Scripts
 
 The `scripts/` folder contains experimental installation and utility scripts. These are currently **in testing** and may not function properly on all systems. Use them with caution.
