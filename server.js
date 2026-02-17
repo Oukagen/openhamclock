@@ -857,7 +857,7 @@ function getStatsFilePath() {
 }
 
 const STATS_FILE = getStatsFilePath();
-const STATS_SAVE_INTERVAL = 60000; // Save every 60 seconds
+const STATS_SAVE_INTERVAL = 5 * 60 * 1000; // Save every 5 minutes (was 60s — too frequent with large geoIPCache)
 
 // Load persistent stats from disk
 function loadVisitorStats() {
@@ -895,7 +895,11 @@ function loadVisitorStats() {
         totalRequestsToday: data.today === new Date().toISOString().slice(0, 10) ? (data.totalRequestsToday || 0) : 0,
         allTimeVisitors: data.allTimeVisitors || 0,
         allTimeRequests: data.allTimeRequests || 0,
-        allTimeUniqueIPs: data.allTimeUniqueIPs || [],
+        // Reconstruct from geoIPCache keys (covers ~99% of IPs) + any legacy array
+        allTimeUniqueIPs: [...new Set([
+          ...(data.allTimeUniqueIPs || []),
+          ...Object.keys(data.geoIPCache || {})
+        ])],
         serverFirstStarted: data.serverFirstStarted || defaults.serverFirstStarted,
         lastDeployment: new Date().toISOString(),
         deploymentCount: (data.deploymentCount || 0) + 1,
@@ -925,12 +929,18 @@ function saveVisitorStats() {
       fs.mkdirSync(dir, { recursive: true });
     }
     
+    // Don't persist allTimeUniqueIPs array — it grows forever and can be
+    // reconstructed from geoIPCache keys on restart. Save memory.
+    // Reconstruct geoIPCache from Map only at save time (not kept in memory as duplicate).
     const data = {
       ...visitorStats,
+      allTimeUniqueIPs: undefined, // Exclude from JSON — reconstructed on load
+      geoIPCache: Object.fromEntries(geoIPCache), // Rebuild from Map for persistence only
       lastSaved: new Date().toISOString()
     };
     
-    fs.writeFileSync(STATS_FILE, JSON.stringify(data, null, 2));
+    // Use compact JSON (no pretty-print) to avoid multi-MB temporary strings
+    fs.writeFileSync(STATS_FILE, JSON.stringify(data));
     visitorStats.lastSaved = data.lastSaved; // Update in-memory too
     saveErrorCount = 0; // Reset on success
     // Only log occasionally to avoid spam
@@ -955,6 +965,10 @@ const visitorStats = loadVisitorStats();
 // Convert today's IPs to a Set for fast lookup
 const todayIPSet = new Set(visitorStats.uniqueIPsToday);
 const allTimeIPSet = new Set(visitorStats.allTimeUniqueIPs);
+const MAX_TRACKED_IPS = 100000; // Stop tracking individual IPs after this (just count)
+
+// Free the array — Set is the authoritative source now, array is no longer persisted
+visitorStats.allTimeUniqueIPs = [];
 
 // ============================================
 // GEO-IP COUNTRY RESOLUTION
@@ -969,6 +983,10 @@ if (!visitorStats.countryStatsToday) visitorStats.countryStatsToday = {}; // Res
 if (!visitorStats.geoIPCache) visitorStats.geoIPCache = {};              // { "1.2.3.4": "US", ... }
 
 const geoIPCache = new Map(Object.entries(visitorStats.geoIPCache));      // ip -> countryCode
+
+// Free the plain object — Map is the authoritative runtime source.
+// Reconstructed from Map only at save time to avoid double memory.
+delete visitorStats.geoIPCache;
 const geoIPQueue = new Set();                                             // IPs pending lookup
 let geoIPLastBatch = 0;
 const GEOIP_BATCH_INTERVAL = 30 * 1000;  // Resolve every 30 seconds
@@ -998,8 +1016,10 @@ function queueGeoIPLookup(ip) {
  */
 function recordCountry(ip, countryCode) {
   if (!countryCode || countryCode === 'Unknown') return;
-  geoIPCache.set(ip, countryCode);
-  visitorStats.geoIPCache[ip] = countryCode;
+  // Only cache individual IP→country mappings up to the cap
+  if (geoIPCache.size < MAX_TRACKED_IPS || geoIPCache.has(ip)) {
+    geoIPCache.set(ip, countryCode);
+  }
   
   // All-time stats
   visitorStats.countryStats[countryCode] = (visitorStats.countryStats[countryCode] || 0) + 1;
@@ -1332,8 +1352,10 @@ app.use((req, res, next) => {
     // Track all-time unique visitors
     const isNewAllTime = !allTimeIPSet.has(ip);
     if (isNewAllTime) {
-      allTimeIPSet.add(ip);
-      visitorStats.allTimeUniqueIPs.push(ip);
+      // Only track individual IPs up to the cap (prevents unbounded memory growth)
+      if (allTimeIPSet.size < MAX_TRACKED_IPS) {
+        allTimeIPSet.add(ip);
+      }
       visitorStats.allTimeVisitors++;
       queueGeoIPLookup(ip);
       logInfo(`[Stats] New visitor (#${visitorStats.uniqueIPsToday.length} today, #${visitorStats.allTimeVisitors} all-time) from ${ip.replace(/\d+$/, 'x')}`);
@@ -1370,8 +1392,22 @@ setInterval(() => {
     spotBufferEntries: pskMqtt.spotBuffer.size,
     spotBufferTotal: [...pskMqtt.spotBuffer.values()].reduce((n, b) => n + b.length, 0),
   };
-  console.log(`[Memory] RSS=${mb(mem.rss)}MB Heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB External=${mb(mem.external)}MB | MQTT: ${mqttStats.sseClients} SSE clients, ${mqttStats.subscribedCalls} calls, ${mqttStats.recentSpotsTotal} recent spots (${mqttStats.recentSpotsEntries} entries), ${mqttStats.spotBufferTotal} buffered | GeoIP=${geoIPCache.size} CallLookup=${callsignLookupCache?.size || 0} MySpots=${mySpotsCache.size} AllTimeIPs=${allTimeIPSet.size}`);
+  console.log(`[Memory] RSS=${mb(mem.rss)}MB Heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB External=${mb(mem.external)}MB | MQTT: ${mqttStats.sseClients} SSE clients, ${mqttStats.subscribedCalls} calls, ${mqttStats.recentSpotsTotal} recent spots (${mqttStats.recentSpotsEntries} entries), ${mqttStats.spotBufferTotal} buffered | GeoIP=${geoIPCache.size} CallLookup=${callsignLookupCache?.size || 0} LocCache=${callsignLocationCache?.size || 0} MySpots=${mySpotsCache.size} AllTimeIPs=${allTimeIPSet.size} RBN=${rbnSpotsByDX?.size || 0}`);
 }, 15 * 60 * 1000);
+
+// Periodic GC compaction — helps V8 release fragmented old-space memory
+// Without this, long-running processes slowly accumulate unreclaimable heap
+setInterval(() => {
+  if (typeof global.gc === 'function') {
+    const before = process.memoryUsage().heapUsed;
+    global.gc();
+    const after = process.memoryUsage().heapUsed;
+    const freed = ((before - after) / 1024 / 1024).toFixed(1);
+    if (freed > 5) {
+      console.log(`[GC] Compaction freed ${freed}MB (${(before / 1024 / 1024).toFixed(0)}MB → ${(after / 1024 / 1024).toFixed(0)}MB)`);
+    }
+  }
+}, 30 * 60 * 1000); // Every 30 minutes
 
 // ============================================
 // AUTO UPDATE (GIT)
@@ -2205,6 +2241,50 @@ app.get('/api/wwff/spots', async (req, res) => {
 // SOTA cache (2 minutes)
 let sotaCache = { data: null, timestamp: 0 };
 const SOTA_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+let sotaSummits = { data: null, timestamp: 0};
+const SOTASUMMITS_CACHE_TTL = 24 * 60 * 60 * 1000; // 1 day
+
+// SOTA Summits
+// SOTA publishes a CSV of the Summit detail every day. Save this into
+// a cache so we can look it up when loading the spots.
+
+async function checkSummitCache() {
+  const now = Date.now();
+  try {
+    if (sotaSummits.data && (now - sotaSummits.timestamp) < SOTASUMMITS_CACHE_TTL) {
+      return;
+    }
+    logDebug('[SOTA] Refreshing sotaSummits');
+    const response = await fetch('https://storage.sota.org.uk/summitslist.csv');
+    const data = await response.text();
+    const rows = data.trim().split('\n');
+    rows.shift(); // discard the title line
+    const headers = rows.shift().split(',').map(header => header.trim());
+    let summit = {};
+
+    rows.forEach(row => {
+      values = row.split(',').map(value => value.trim());
+      const obj = {};
+      headers.forEach((header, index) => {
+        obj[header] = values[index].replace(/"/g, '');
+      });
+      summit[obj['SummitCode']] = {
+        latitude: obj['Latitude'],
+        longitude: obj['Longitude'],
+        name: obj['SummitName'],
+        altM: obj['AltM'],
+        points: obj['Points']
+      };
+    });
+    sotaSummits = {
+      data: summit,
+      timestamp: now
+    }
+  } catch(error) {
+    logErrorOnce('[SOTA]', error.message);
+  }
+}
+checkSummitCache(); // Prime the sotaSummits cache
 
 // SOTA Spots
 app.get('/api/sota/spots', async (req, res) => {
@@ -2214,9 +2294,23 @@ app.get('/api/sota/spots', async (req, res) => {
       res.set('Cache-Control', 'public, max-age=90, s-maxage=90');
       return res.json(sotaCache.data);
     }
-    
+
+    checkSummitCache(); // Updates sotaSummits if required
+
     const response = await fetch('https://api2.sota.org.uk/api/spots/50/all');
     const data = await response.json();
+
+    if (sotaSummits.data) {
+      // If we have data in the sotaSummits cache, use it to populate summitDetails.
+      data.map(s => {
+        const summit = `${s.associationCode}/${s.summitCode}`;
+        s.summitDetails = sotaSummits.data[summit];
+      });
+    }
+    if (Array.isArray(data) && data.length > 0) {
+      const sample = data[0];
+      logDebug('[SOTA] API returned', data.length, 'spots. Sample fields:', Object.keys(sample).join(', '));
+    }
     
     // Cache the response
     sotaCache = { data, timestamp: Date.now() };
@@ -4927,7 +5021,16 @@ const rbnSpotsByDX = new Map(); // Map<dxCallsign, spot[]>
 const MAX_SPOTS_PER_DX = 50;   // Keep up to 50 spots per DX station
 const MAX_DX_CALLSIGNS = 5000; // Track up to 5000 unique DX stations
 const RBN_SPOT_TTL = 30 * 60 * 1000; // 30 minutes
-const callsignLocationCache = new Map(); // Permanent cache for skimmer locations
+const callsignLocationCache = new Map(); // Cache for skimmer/station locations
+const LOCATION_CACHE_MAX = 2000; // ~1000 active RBN skimmers worldwide, 2x headroom
+
+function cacheCallsignLocation(call, data) {
+  if (callsignLocationCache.size >= LOCATION_CACHE_MAX && !callsignLocationCache.has(call)) {
+    const oldest = callsignLocationCache.keys().next().value;
+    if (oldest) callsignLocationCache.delete(oldest);
+  }
+  callsignLocationCache.set(call, data);
+}
 let rbnSpotCount = 0; // Total spots received (for stats)
 
 // Helper function to convert frequency to band
@@ -5125,7 +5228,7 @@ async function enrichSpotWithLocation(spot) {
         };
         
         // Cache permanently
-        callsignLocationCache.set(skimmerCall, location);
+        cacheCallsignLocation(skimmerCall, location);
         
         return {
           ...spot,
@@ -5221,7 +5324,7 @@ app.get('/api/rbn/location/:callsign', async (req, res) => {
       };
       
       // Cache permanently (skimmers don't move!)
-      callsignLocationCache.set(callsign, result);
+      cacheCallsignLocation(callsign, result);
       
       return res.json(result);
     }
@@ -5637,14 +5740,11 @@ const HAM_SATELLITES = {
 
 let tleCache = { data: null, timestamp: 0 };
 const TLE_CACHE_DURATION = 6 * 60 * 60 * 1000; // 6 hours
-const OFFLINE_MODE = false; // Set to false when you want live data again
-
 app.get('/api/satellites/tle', async (req, res) => {
   try {
     const now = Date.now();
-    const backupFilePath = path.join(__dirname, 'tle_backup.txt'); // Define this first
 
-    // 1. Return memory cache if fresh
+    // Return memory cache if fresh (6-hour window)
     if (tleCache.data && (now - tleCache.timestamp) < TLE_CACHE_DURATION) {
       return res.json(tleCache.data);
     }
@@ -5664,7 +5764,7 @@ app.get('/api/satellites/tle', async (req, res) => {
 	
 	 // --- COMMENT OUT THE START OF THE FETCH LOGIC IF TESTING SO AS TO NOT PULL FROM CELSTRACK TOO OFTEN AND const OFFLINE_MODE = false; // Set to false when you want live data again ---
     logDebug('[Satellites] Fetching fresh TLE data from multiple groups...');
-    const tleData = {}; // Declare this exactly once to avoid SyntaxErrors
+    const tleData = {};
     
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -8737,7 +8837,7 @@ function handleWSJTXMessage(msg, state) {
 }
 
 // ---- N3FJP Logged QSO relay (in-memory) ----
-const N3FJP_QSO_RETENTION_MINUTES = parseInt(process.env.N3FJP_QSO_RETENTION_MINUTES || "15", 10);
+const N3FJP_QSO_RETENTION_MINUTES = parseInt(process.env.N3FJP_QSO_RETENTION_MINUTES || "1440", 10);
 let n3fjpQsos = [];
 
 function pruneN3fjpQsos() {

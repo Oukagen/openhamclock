@@ -18,6 +18,8 @@ import {
   importProfile
 } from '../utils/profiles.js';
 
+import useLocalInstall from '../hooks/app/useLocalInstall.js';
+
 export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, satellites, satelliteFilters, onSatelliteFiltersChange, mapLayers, onToggleDXNews }) => {
   const [callsign, setCallsign] = useState(config?.callsign || '');
   const [headerSize, setheaderSize] = useState(config?.headerSize || 1.0);
@@ -39,6 +41,40 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
   const [rigPort, setRigPort] = useState(config?.rigControl?.port || 5555);
   const [tuneEnabled, setTuneEnabled] = useState(config?.rigControl?.tuneEnabled || false);
   const [satelliteSearch, setSatelliteSearch] = useState('');
+  const isLocalInstall = useLocalInstall();
+  const [rotatorEnabled, setRotatorEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_rotator_enabled') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  // Local-only integration flags
+  const [n3fjpEnabled, setN3fjpEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_n3fjp_enabled') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  // N3FJP UI settings (persisted)
+  const [n3fjpDisplayMinutes, setN3fjpDisplayMinutes] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('n3fjp_display_minutes') || '15', 10);
+      return Number.isFinite(v) ? v : 15;
+    } catch {
+      return 15;
+    }
+  });
+  const [n3fjpLineColor, setN3fjpLineColor] = useState(() => {
+    try {
+      return localStorage.getItem('n3fjp_line_color') || '#3388ff';
+    } catch {
+      return '#3388ff';
+    }
+  });
   const { t, i18n } = useTranslation();
 
   // Layer controls
@@ -93,6 +129,31 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
       }
     }
   }, [config, isOpen]);
+
+  // Keep rotator toggle in sync with localStorage when opening settings
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      setRotatorEnabled(localStorage.getItem('ohc_rotator_enabled') === '1');
+    } catch {
+      setRotatorEnabled(false);
+    }
+  }, [isOpen]);
+
+  // Keep N3FJP toggle/settings in sync with localStorage when opening settings
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      setN3fjpEnabled(localStorage.getItem('ohc_n3fjp_enabled') === '1');
+      const v = parseInt(localStorage.getItem('n3fjp_display_minutes') || '15', 10);
+      setN3fjpDisplayMinutes(Number.isFinite(v) ? v : 15);
+      setN3fjpLineColor(localStorage.getItem('n3fjp_line_color') || '#3388ff');
+    } catch {
+      setN3fjpEnabled(false);
+      setN3fjpDisplayMinutes(15);
+      setN3fjpLineColor('#3388ff');
+    }
+  }, [isOpen]);
 
   // Load layers when panel opens
   useEffect(() => {
@@ -348,7 +409,8 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
         {/* Tab Navigation */}
         <div style={{
           display: 'flex',
-          gap: '8px',
+          flexWrap: 'wrap',
+          gap: '4px',
           marginBottom: '24px',
           borderBottom: '1px solid var(--border-color)',
           paddingBottom: '12px'
@@ -370,6 +432,25 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
           >
             {t('station.settings.tab1.title')}
           </button>
+
+          <button
+            onClick={() => setActiveTab('integrations')}
+            style={{
+              flex: 1,
+              padding: '10px',
+              background: activeTab === 'integrations' ? 'var(--accent-amber)' : 'transparent',
+              border: 'none',
+              borderRadius: '6px 6px 0 0',
+              color: activeTab === 'integrations' ? '#000' : 'var(--text-secondary)',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'integrations' ? '700' : '400',
+              fontFamily: 'JetBrains Mono, monospace'
+            }}
+          >
+            Integrations
+          </button>
+
           <button
             onClick={() => setActiveTab('layers')}
             style={{
@@ -421,6 +502,23 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
           >
             Profiles
           </button>
+          <button
+            onClick={() => setActiveTab('community')}
+            style={{
+              flex: 1,
+              padding: '10px',
+              background: activeTab === 'community' ? 'var(--accent-amber)' : 'transparent',
+              border: 'none',
+              borderRadius: '6px 6px 0 0',
+              color: activeTab === 'community' ? '#000' : 'var(--text-secondary)',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'community' ? '700' : '400',
+              fontFamily: 'JetBrains Mono, monospace'
+            }}
+          >
+            Community
+          </button>
         </div>
 
         {/* Station Settings Tab */}
@@ -447,6 +545,19 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
                 </div>
               </div>
             )}
+
+            {/* Integrations moved to dedicated tab */}
+            <div style={{
+              background: 'rgba(0, 255, 255, 0.04)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '20px',
+              fontSize: 12,
+              color: 'var(--text-secondary)'
+            }}>
+              Looking for Rotator / N3FJP / other add-ons? See <b>Settings → Integrations</b>.
+            </div>
 
             {/* Callsign */}
             <div style={{ marginBottom: '20px' }}>
@@ -1286,6 +1397,382 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
               </div>
             </div>
           </>
+        )}
+
+        {/* Integrations Tab */}
+        {activeTab === 'integrations' && (
+          <div>
+            {/* Status pill */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 16,
+              padding: '10px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-tertiary)'
+            }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                These features require a local OpenHamClock instance.
+              </div>
+              <div style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 11,
+                padding: '4px 10px',
+                borderRadius: 999,
+                border: `1px solid ${isLocalInstall ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.18)'}`,
+                color: isLocalInstall ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                background: isLocalInstall ? 'rgba(0,255,255,0.10)' : 'rgba(0,0,0,0.25)'
+              }}>
+                {isLocalInstall ? 'Local mode' : 'Hosted mode'}
+              </div>
+            </div>
+
+            {/* Local-only group */}
+            <div style={{
+              background: 'rgba(0, 255, 255, 0.05)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              marginBottom: 16
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: 10
+              }}>
+                <div>
+                  <div style={{ color: 'var(--accent-cyan)', fontWeight: 800, letterSpacing: 0.2 }}>
+                    Local-only
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45, marginTop: 4 }}>
+                    These integrations are disabled on the hosted site so they can never crash or spam the network.
+                  </div>
+                </div>
+              </div>
+
+              {/* Rotator */}
+              <div style={{
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                paddingTop: 12,
+                marginTop: 8
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>🧭 Rotator</div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
+                      Requires a rotator backend (e.g., PstRotatorAz or a simple HTTP bridge) reachable by your local OpenHamClock Node server.
+                    </div>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      disabled={!isLocalInstall}
+                      checked={!!rotatorEnabled && isLocalInstall}
+                      onChange={(e) => {
+                        const next = !!e.target.checked;
+                        setRotatorEnabled(next);
+                        try { localStorage.setItem('ohc_rotator_enabled', next ? '1' : '0'); } catch {}
+                        // Default overlay OFF when enabling (hosted-safe + predictable)
+                        if (next) {
+                          try {
+                            const raw = localStorage.getItem('openhamclock_mapLayers') || '{}';
+                            const ml = JSON.parse(raw);
+                            ml.showRotatorBearing = false;
+                            localStorage.setItem('openhamclock_mapLayers', JSON.stringify(ml));
+                          } catch {}
+                        }
+                        try { window.dispatchEvent(new Event('ohc-rotator-config-changed')); } catch {}
+                      }}
+                    />
+                    Enable
+                  </label>
+                </div>
+
+                <details style={{ marginTop: 10 }}>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      color: "var(--accent-amber)",
+                      fontSize: 12,
+                      userSelect: "none",
+                    }}
+                  >
+                    Learn how
+                  </summary>
+
+                  <div
+                    style={{
+                      marginTop: 8,
+                      color: "var(--text-secondary)",
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      <b>Quick start (Local Only):</b>
+                    </div>
+
+                    <ol style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>
+                        Run OpenHamClock locally:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          npm start
+                        </div>
+                        Open the local URL shown in your terminal (example: http://127.0.0.1:3001).
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Install and configure <b>PstRotatorAz</b> (or another rotator backend)
+                        on your LAN.
+                        <div style={{ marginTop: 4 }}>
+                          Enable and start its control interface (web/UDP).
+                        </div>
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        In the OpenHamClock folder:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          copy .env.example → .env
+                        </div>
+                        Then edit:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          VITE_PSTROTATOR_TARGET=http://192.168.1.43:50004
+                        </div>
+                        (Replace with the IP and port of your PstRotatorAz machine.)
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Ensure Windows Firewall allows the PstRotatorAz port.
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Enable Rotator here, then add the <b>Rotator</b> panel using the “+”
+                        button on any tabset.
+                      </li>
+                    </ol>
+
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
+                      Tip: Click <b>MAP ON</b> inside the Rotator panel to show the bearing
+                      overlay. Hold <b>Shift</b> and click the map to rotate your antenna to
+                      that heading.
+                    </div>
+
+                    <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                      Note: This feature cannot work on the hosted site because it requires
+                      access to devices on your local network.
+                    </div>
+                  </div>
+                </details>
+
+                {!isLocalInstall && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      color: "var(--text-muted)",
+                      fontSize: 11,
+                    }}
+                  >
+                    Hosted mode detected — Rotator cannot be enabled here.
+                  </div>
+                )}
+
+              </div>
+
+              {/* N3FJP */}
+              <div style={{
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                paddingTop: 12,
+                marginTop: 14
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>🗺️ N3FJP Logged QSOs</div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
+                      Shows recent QSOs posted by your local N3FJP→OHC bridge (layer overlay).
+                    </div>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      disabled={!isLocalInstall}
+                      checked={!!n3fjpEnabled && isLocalInstall}
+                      onChange={(e) => {
+                        const next = !!e.target.checked;
+                        setN3fjpEnabled(next);
+                        try { localStorage.setItem('ohc_n3fjp_enabled', next ? '1' : '0'); } catch {}
+                        try { window.dispatchEvent(new Event('ohc-n3fjp-config-changed')); } catch {}
+
+                        // ✅ Also toggle the map layer automatically
+                        try {
+                          // Preferred: uses live WorldMap controls (updates state + localStorage)
+                          if (window.hamclockLayerControls?.toggleLayer) {
+                            window.hamclockLayerControls.toggleLayer('n3fjp_logged_qsos', next);
+                          } else {
+                            // Fallback: write the plugin-layer setting directly
+                            const raw = localStorage.getItem('openhamclock_mapSettings') || '{}';
+                            const settings = JSON.parse(raw);
+                            const layers = settings.layers || {};
+                            layers['n3fjp_logged_qsos'] = { ...(layers['n3fjp_logged_qsos'] || {}), enabled: next };
+                            settings.layers = layers;
+                            localStorage.setItem('openhamclock_mapSettings', JSON.stringify(settings));
+                          }
+                        } catch {}
+                      }}
+                    />
+                    Enable
+                  </label>
+                </div>
+
+                {/* Simple config */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 160px' }}>
+                    <label style={{ display: 'block', marginBottom: 6, color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Display window
+                    </label>
+                    <select
+                      disabled={!isLocalInstall || !n3fjpEnabled}
+                      value={n3fjpDisplayMinutes}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        const next = Number.isFinite(v) ? v : 15;
+                        setN3fjpDisplayMinutes(next);
+                        try { localStorage.setItem('n3fjp_display_minutes', String(next)); } catch {}
+                        try { window.dispatchEvent(new Event('ohc-n3fjp-config-changed')); } catch {}
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        color: 'var(--text-primary)',
+                        fontSize: '14px',
+                        fontFamily: 'JetBrains Mono, monospace'
+                      }}
+                    >
+                      {[15, 30, 60, 120, 240, 720, 1440].map((m) => (
+                        <option key={m} value={m}>
+                          {m === 60 ? "1 hour" : m < 60 ? `${m} min` : `${m / 60} hours`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ flex: '0 0 120px' }}>
+                    <label style={{ display: 'block', marginBottom: 6, color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Line color
+                    </label>
+                    <input
+                      disabled={!isLocalInstall || !n3fjpEnabled}
+                      type="color"
+                      value={n3fjpLineColor}
+                      onChange={(e) => {
+                        const next = e.target.value || '#3388ff';
+                        setN3fjpLineColor(next);
+                        try { localStorage.setItem('n3fjp_line_color', next); } catch {}
+                        try { window.dispatchEvent(new Event('ohc-n3fjp-config-changed')); } catch {}
+                      }}
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        padding: 0,
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 6,
+                        background: 'transparent'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <details style={{ marginTop: 10 }}>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      color: "var(--accent-amber)",
+                      fontSize: 12,
+                      userSelect: "none",
+                    }}
+                  >
+                    Learn how
+                  </summary>
+
+                  <div
+                    style={{
+                      marginTop: 8,
+                      color: "var(--text-secondary)",
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      <b>Quick start (Local Only):</b>
+                    </div>
+
+                    <ol style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>
+                        Run OpenHamClock locally:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          npm start
+                        </div>
+                        Open the local URL shown in your terminal
+                        (example: http://127.0.0.1:3001).
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Install the N3FJP bridge on the same PC (or LAN machine)
+                        that can access your N3FJP logger.
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Edit the bridge <b>config.json</b> file and set:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          "OHC_BASE_URL": "http://127.0.0.1:3001"
+                        </div>
+                        (Use the exact URL printed by OpenHamClock.)
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Ensure:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          "ENABLE_OHC_HTTP": true
+                        </div>
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Start the bridge script (PowerShell or VBS launcher).
+                        You should see log messages when QSOs are entered.
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Enable this integration here, then turn on
+                        <b> Logged QSOs (N3FJP)</b> in
+                        <b> Settings → Map Layers</b>.
+                      </li>
+                    </ol>
+
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
+                      Tip: If you see “connection refused,” verify that OpenHamClock
+                      is running locally and that the port matches your
+                      <b> OHC_BASE_URL</b> setting.
+                    </div>
+
+                    <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                      Note: This integration cannot work on the hosted site because it
+                      requires access to your local N3FJP logger and LAN services.
+                    </div>
+                  </div>
+                </details>
+
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Map Layers Tab */}
@@ -2321,6 +2808,97 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
               </div>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }}>
                 Share profile files between devices or operators. Exported files contain all settings, layout preferences, map layers, and filter configurations.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Community Tab */}
+        {activeTab === 'community' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+              Join the OpenHamClock community — report bugs, request features, and connect with other operators.
+            </p>
+            <a href="https://github.com/accius/openhamclock" target="_blank" rel="noopener noreferrer" style={{
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px',
+              background: 'var(--bg-tertiary)', borderRadius: '8px', textDecoration: 'none',
+              color: 'var(--text-primary)', border: '1px solid transparent', transition: 'border-color 0.2s'
+            }} onMouseOver={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
+               onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>GitHub</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source code, issues & releases</div>
+              </div>
+            </a>
+            <a href="https://www.facebook.com/groups/1217043013897440" target="_blank" rel="noopener noreferrer" style={{
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px',
+              background: 'var(--bg-tertiary)', borderRadius: '8px', textDecoration: 'none',
+              color: 'var(--text-primary)', border: '1px solid transparent', transition: 'border-color 0.2s'
+            }} onMouseOver={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
+               onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>Facebook Group</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Community discussion & help</div>
+              </div>
+            </a>
+            <a href="https://www.reddit.com/r/OpenHamClock/" target="_blank" rel="noopener noreferrer" style={{
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px',
+              background: 'var(--bg-tertiary)', borderRadius: '8px', textDecoration: 'none',
+              color: 'var(--text-primary)', border: '1px solid transparent', transition: 'border-color 0.2s'
+            }} onMouseOver={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
+               onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#FF4500"><path d="M12 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0012 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 01-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 01.042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 014.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 01.14-.197.35.35 0 01.238-.042l2.906.617a1.214 1.214 0 011.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 00-.231.094.33.33 0 000 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 000-.463.327.327 0 00-.462 0c-.545.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 00-.205-.094z"/></svg>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>Reddit</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>r/OpenHamClock</div>
+              </div>
+            </a>
+            <div style={{ marginTop: '16px', padding: '14px 16px', background: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--accent-amber)' }}>Created by Chris Hetherington — K0CJH</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '6px', lineHeight: '1.5' }}>Built with the help of an amazing community of amateur radio operators contributing features, reporting bugs, and making OpenHamClock better every day.</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>K0CJH / openhamclock.com</div>
+            </div>
+
+            {/* Contributors */}
+            <div style={{ marginTop: '12px', padding: '14px 16px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--accent-amber)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', textAlign: 'center' }}>Contributors</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginBottom: '10px' }}>Thank you to everyone who has contributed code, features, bug fixes, and ideas.</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
+                {[
+                  'creinemann', 'ceotjoe', 'alanhargreaves', 'dmazan', 'Delerius',
+                  'rfreedman', 'SebFox2011', 'infopcgood', 'thomas-schreck', 'echo-gravitas',
+                  'yuryja', 'Holyszewski', 'trancen', 'ThePangel', 'w8mej',
+                  'JoshuaNewport', 'denete', 'kmanwar89', 'KentenRoth', 's53zo',
+                  'theodeurne76', 'm1dst', 'brianbruff'
+                ].map(name => (
+                  <a
+                    key={name}
+                    href={`https://github.com/${name}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-block',
+                      padding: '4px 10px',
+                      background: 'var(--bg-secondary)',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      color: 'var(--text-secondary)',
+                      textDecoration: 'none',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      border: '1px solid transparent',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--accent-cyan)'; e.currentTarget.style.color = 'var(--accent-cyan)'; }}
+                    onMouseOut={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                  >
+                    {name}
+                  </a>
+                ))}
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '10px' }}>
+                Want to contribute? Check out our GitHub — issues, pull requests, and ideas are all welcome.
               </div>
             </div>
           </div>
