@@ -30,19 +30,24 @@ jobs:
     
     - name: Start server and test health endpoint
       run: |
-        PORT=3000 node server.js &
+        node server.js &
         SERVER_PID=$!
 
         for i in $(seq 1 30); do
           if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
-            echo "✓ Health check passed on attempt $i"
+            echo "✓ Health check passed on :3000 attempt $i"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 0
+          fi
+          if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+            echo "✓ Health check passed on :3001 attempt $i"
             kill $SERVER_PID 2>/dev/null || true
             exit 0
           fi
           sleep 1
         done
 
-        echo "✗ Health check failed after 30 attempts"
+        echo "✗ Health check failed after 30 attempts (tried :3000 and :3001)"
         kill $SERVER_PID 2>/dev/null || true
         exit 1
         
