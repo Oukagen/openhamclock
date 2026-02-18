@@ -11,6 +11,7 @@ All notable changes to OpenHamClock will be documented in this file.
 - **QRZ login spam**: Credential failure cooldown only resets when credentials actually change, preventing repeated bad-login attempts across users
 - **Memory leaks**: rbnApiCaches now auto-cleaned every 60s, callsign cache cap reduced 10K→5K, IP tracking cap reduced 100K→50K
 - **Express error handling**: Added proper error middleware for BadRequestError/PayloadTooLargeError — no more stack traces from client disconnects
+- **DX Cluster mode filter**: Selecting SSB, FT8, CW etc. in cluster filters hid all spots because mode was only detected from comment text (most spots don't mention mode). Now infers mode from frequency using digital island detection (FT8/FT4 calling freqs) and band plan segments (CW/SSB regions)
 
 ### Added
 - Prettier code formatting pipeline with `.prettierrc`, pre-commit hooks (Husky + lint-staged), and CI enforcement

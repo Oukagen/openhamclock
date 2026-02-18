@@ -44,6 +44,11 @@ const CHANGELOG = [
         title: 'Rig Control Options Restored',
         desc: 'The rig-bridge (flrig/rigctld) and rig-control (daemon mode) directories are back for power users who need more customization than the one-click Rig Listener provides.'
       },
+      {
+        icon: '🔎',
+        title: 'DX Cluster Mode Filter Fixed',
+        desc: 'Filtering by SSB, FT8, or CW no longer hides everything. Mode detection now infers from frequency when the spot comment doesn\'t mention a mode — which is most spots. 14.074? That\'s FT8. 14.250? SSB. It just works now.'
+      },
     ]
   },
   {

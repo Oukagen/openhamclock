@@ -75,20 +75,101 @@ export const getBandColor = (freq) => {
 };
 
 /**
- * Detect mode from comment text
+ * Detect mode from comment text, with frequency-based fallback.
+ * Comment keywords take priority; if no mode keyword is found,
+ * infer from frequency using known digital islands and band plan segments.
+ *
+ * @param {string} comment - Spot comment text
+ * @param {number|string} [freq] - Frequency in MHz (e.g. 14.074) or kHz (e.g. 14074)
+ * @returns {string|null} - Detected mode or null
  */
-export const detectMode = (comment) => {
-  if (!comment) return null;
-  const upper = comment.toUpperCase();
-  if (upper.includes("FT8")) return "FT8";
-  if (upper.includes("FT4")) return "FT4";
-  if (upper.includes("CW")) return "CW";
-  if (upper.includes("SSB") || upper.includes("LSB") || upper.includes("USB"))
-    return "SSB";
-  if (upper.includes("RTTY")) return "RTTY";
-  if (upper.includes("PSK")) return "PSK";
-  if (upper.includes("AM")) return "AM";
-  if (upper.includes("FM")) return "FM";
+export const detectMode = (comment, freq) => {
+  // 1) Try comment-based detection first (highest confidence)
+  if (comment) {
+    const upper = comment.toUpperCase();
+    if (upper.includes("FT8")) return "FT8";
+    if (upper.includes("FT4")) return "FT4";
+    if (upper.includes("CW")) return "CW";
+    if (upper.includes("SSB") || upper.includes("LSB") || upper.includes("USB"))
+      return "SSB";
+    if (upper.includes("RTTY")) return "RTTY";
+    if (upper.includes("PSK")) return "PSK";
+    // Check AM/FM carefully — "AM" appears in many callsigns/words
+    if (/\bAM\b/.test(upper)) return "AM";
+    if (/\bFM\b/.test(upper)) return "FM";
+  }
+
+  // 2) Frequency-based fallback
+  if (freq == null) return null;
+  const f = parseFloat(freq);
+  if (!Number.isFinite(f) || f <= 0) return null;
+  // Normalize to MHz (spots may arrive in kHz or MHz)
+  const mhz = f > 1000 ? f / 1000 : f;
+
+  // Digital islands — narrow ±3 kHz windows around known calling frequencies
+  const TOLERANCE = 0.003;
+  const DIGITAL_ISLANDS = [
+    // FT8 calling frequencies
+    { mhz: 1.840, mode: "FT8" },
+    { mhz: 3.573, mode: "FT8" },
+    { mhz: 7.074, mode: "FT8" },
+    { mhz: 10.136, mode: "FT8" },
+    { mhz: 14.074, mode: "FT8" },
+    { mhz: 18.100, mode: "FT8" },
+    { mhz: 21.074, mode: "FT8" },
+    { mhz: 24.915, mode: "FT8" },
+    { mhz: 28.074, mode: "FT8" },
+    { mhz: 50.313, mode: "FT8" },
+    // FT4 calling frequencies
+    { mhz: 3.575, mode: "FT4" },
+    { mhz: 7.0475, mode: "FT4" },
+    { mhz: 10.140, mode: "FT4" },
+    { mhz: 14.080, mode: "FT4" },
+    { mhz: 18.104, mode: "FT4" },
+    { mhz: 21.140, mode: "FT4" },
+    { mhz: 24.919, mode: "FT4" },
+    { mhz: 28.180, mode: "FT4" },
+    { mhz: 50.318, mode: "FT4" },
+    // RTTY common frequencies
+    { mhz: 3.580, mode: "RTTY" },
+    { mhz: 7.035, mode: "RTTY" },
+    { mhz: 14.080, mode: "RTTY" }, // Note: overlaps FT4 — FT4 checked first
+    { mhz: 21.080, mode: "RTTY" },
+    { mhz: 28.080, mode: "RTTY" },
+  ];
+
+  for (const island of DIGITAL_ISLANDS) {
+    if (Math.abs(mhz - island.mhz) <= TOLERANCE) {
+      return island.mode;
+    }
+  }
+
+  // Band plan segments — CW vs SSB by frequency range
+  // These are broader and lower confidence, but good enough for filtering
+  if (mhz >= 1.800 && mhz < 1.840) return "CW";
+  if (mhz >= 1.840 && mhz <= 2.000) return "SSB";
+  if (mhz >= 3.500 && mhz < 3.600) return "CW";
+  if (mhz >= 3.600 && mhz <= 4.000) return "SSB";
+  if (mhz >= 7.000 && mhz < 7.050) return "CW";
+  if (mhz >= 7.050 && mhz < 7.070) return "CW"; // CW/digital segment
+  if (mhz >= 7.150 && mhz <= 7.300) return "SSB";
+  if (mhz >= 10.100 && mhz <= 10.150) return "CW";
+  if (mhz >= 14.000 && mhz < 14.070) return "CW";
+  if (mhz >= 14.150 && mhz <= 14.350) return "SSB";
+  if (mhz >= 18.068 && mhz < 18.095) return "CW";
+  if (mhz >= 18.110 && mhz <= 18.168) return "SSB";
+  if (mhz >= 21.000 && mhz < 21.070) return "CW";
+  if (mhz >= 21.150 && mhz <= 21.450) return "SSB";
+  if (mhz >= 24.890 && mhz < 24.910) return "CW";
+  if (mhz >= 24.930 && mhz <= 24.990) return "SSB";
+  if (mhz >= 28.000 && mhz < 28.070) return "CW";
+  if (mhz >= 28.300 && mhz <= 29.000) return "SSB";
+  if (mhz >= 50.000 && mhz < 50.100) return "CW";
+  if (mhz >= 50.100 && mhz <= 50.300) return "SSB";
+  // 2m/70cm FM simplex
+  if (mhz >= 144.000 && mhz <= 148.000) return "FM";
+  if (mhz >= 420.000 && mhz <= 450.000) return "FM";
+
   return null;
 };
 
