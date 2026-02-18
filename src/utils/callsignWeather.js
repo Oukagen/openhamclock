@@ -1,9 +1,10 @@
 // src/utils/callsignWeather.js
 // Lightweight Open-Meteo fetch with caching + in-flight de-dupe.
 // Designed for hover overlays: fetch-on-demand, no polling.
+import { normalizeLon } from './geo'; // adjust path if needed
 
-const CACHE = new Map();        // key -> { ts, data }
-const INFLIGHT = new Map();     // key -> Promise
+const CACHE = new Map(); // key -> { ts, data }
+const INFLIGHT = new Map(); // key -> Promise
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
 function keyFor(lat, lon) {
@@ -15,7 +16,18 @@ function keyFor(lat, lon) {
 
 async function fetchOpenMeteo(lat, lon) {
   let apiKey = '';
-  try { apiKey = localStorage.getItem('ohc_openmeteo_apikey') || ''; } catch {}
+  try {
+    apiKey = localStorage.getItem('ohc_openmeteo_apikey') || '';
+  } catch {}
+
+  function clamp(n, min, max) {
+    return Math.min(max, Math.max(min, n));
+  }
+
+  // inside your fetchWeatherByLatLon (or equivalent) before using lat/lon:
+  lat = clamp(Number(lat), -90, 90);
+  lon = normalizeLon(Number(lon));
+  lon = clamp(lon, -180, 180);
 
   const params = [
     `latitude=${lat}`,
@@ -26,13 +38,11 @@ async function fetchOpenMeteo(lat, lon) {
     'wind_speed_unit=kmh',
     'precipitation_unit=mm',
     'timezone=auto',
-    'forecast_hours=3'
+    'forecast_hours=3',
   ];
 
   if (apiKey) params.push(`apikey=${apiKey}`);
-  const base = apiKey
-    ? 'https://customer-api.open-meteo.com/v1/forecast'
-    : 'https://api.open-meteo.com/v1/forecast';
+  const base = apiKey ? 'https://customer-api.open-meteo.com/v1/forecast' : 'https://api.open-meteo.com/v1/forecast';
 
   const res = await fetch(`${base}?${params.join('&')}`);
   if (res.status === 429) throw new Error('Rate limited');
@@ -48,7 +58,7 @@ export async function getCallsignWeather(lat, lon, { ttlMs = DEFAULT_TTL_MS } = 
   const now = Date.now();
 
   const cached = CACHE.get(key);
-  if (cached && (now - cached.ts) < ttlMs) return cached.data;
+  if (cached && now - cached.ts < ttlMs) return cached.data;
 
   const inflight = INFLIGHT.get(key);
   if (inflight) return inflight;
