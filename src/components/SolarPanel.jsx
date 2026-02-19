@@ -396,6 +396,9 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
     // phase 0=new(dark), 0.25=first quarter(right lit), 0.5=full(all lit), 0.75=last quarter(left lit)
     const R = 60; // moon radius
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
     const CX = 70,
       CY = 70;
 
@@ -438,6 +441,7 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
     };
 
     const litPath = buildMoonPath();
+<<<<<<< Updated upstream
     const R = 60;
 =======
 >>>>>>> Stashed changes
@@ -483,6 +487,8 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
     };
 
     const litPath = buildMoonPath();
+=======
+>>>>>>> Stashed changes
 
     return (
       <div>
