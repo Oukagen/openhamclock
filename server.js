@@ -3817,21 +3817,27 @@ app.get('/api/dxcluster/paths', async (req, res) => {
     }
 
     // Get unique callsigns to look up (sanitize and strip modifiers)
-    // 5Z4/OZ6ABL → OZ6ABL, UA1TAN/M → UA1TAN so lookups hit the home call
+    // For QRZ/HamQTH: use home callsign (W9WI from PJ2/W9WI) to get licensee data
+    // For prefix/location: use operating prefix (PJ2 from PJ2/W9WI) to get DXCC entity
     const allCalls = new Set();
-    const baseCallMap = {}; // raw → base mapping for spot building
+    const baseCallMap = {};    // raw → home callsign (for QRZ lookups)
+    const prefixCallMap = {};  // raw → operating prefix (for location/DXCC)
     newSpots.forEach((s) => {
       const spotter = (s.spotter || '').replace(/[<>]/g, '').trim();
       const dxCall = (s.dxCall || '').replace(/[<>]/g, '').trim();
       if (spotter) {
         const base = extractBaseCallsign(spotter);
-        allCalls.add(base);
+        const opPrefix = extractOperatingPrefix(spotter);
+        allCalls.add(opPrefix);
         baseCallMap[spotter] = base;
+        prefixCallMap[spotter] = opPrefix;
       }
       if (dxCall) {
         const base = extractBaseCallsign(dxCall);
-        allCalls.add(base);
+        const opPrefix = extractOperatingPrefix(dxCall);
+        allCalls.add(opPrefix);
         baseCallMap[dxCall] = base;
+        prefixCallMap[dxCall] = opPrefix;
       }
     });
 
@@ -3959,16 +3965,23 @@ app.get('/api/dxcluster/paths', async (req, res) => {
         }
 
         // Fall back to HamQTH cached location (more accurate than prefix)
+        // HamQTH uses home callsign — but for portable ops, prefix location wins
         if (
           !dxLoc &&
           hamqthLocations[baseCallMap[spot.dxCall] || spot.dxCall]
         ) {
-          dxLoc = hamqthLocations[baseCallMap[spot.dxCall] || spot.dxCall];
+          // Only use HamQTH location if there's no operating prefix override
+          // (i.e. the call is not a compound prefix/callsign like PJ2/W9WI)
+          const opPrefix = prefixCallMap[spot.dxCall];
+          const homeCall = baseCallMap[spot.dxCall];
+          if (!opPrefix || opPrefix === homeCall) {
+            dxLoc = hamqthLocations[homeCall || spot.dxCall];
+          }
         }
 
         // Fall back to prefix location (now includes grid-based coordinates!)
         if (!dxLoc) {
-          dxLoc = prefixLocations[baseCallMap[spot.dxCall] || spot.dxCall];
+          dxLoc = prefixLocations[prefixCallMap[spot.dxCall] || spot.dxCall];
           if (dxLoc && dxLoc.grid) {
             dxGridSquare = dxLoc.grid;
           }
@@ -4014,14 +4027,17 @@ app.get('/api/dxcluster/paths', async (req, res) => {
           !spotterLoc &&
           hamqthLocations[baseCallMap[spot.spotter] || spot.spotter]
         ) {
-          spotterLoc =
-            hamqthLocations[baseCallMap[spot.spotter] || spot.spotter];
+          const opPrefix = prefixCallMap[spot.spotter];
+          const homeCall = baseCallMap[spot.spotter];
+          if (!opPrefix || opPrefix === homeCall) {
+            spotterLoc = hamqthLocations[homeCall || spot.spotter];
+          }
         }
 
         // Fall back to prefix location for spotter (now includes grid-based coordinates!)
         if (!spotterLoc) {
           spotterLoc =
-            prefixLocations[baseCallMap[spot.spotter] || spot.spotter];
+            prefixLocations[prefixCallMap[spot.spotter] || spot.spotter];
           if (spotterLoc && spotterLoc.grid) {
             spotterGridSquare = spotterLoc.grid;
           }
@@ -4220,6 +4236,51 @@ function extractBaseCallsign(raw) {
   // If multiple match (rare) or none match, pick the longest
   candidates.sort((a, b) => b.length - a.length);
   return candidates[0];
+}
+
+/**
+ * Extract the operating prefix/entity for location and DXCC determination.
+ *
+ * This is different from extractBaseCallsign (which finds the home call for
+ * QRZ lookups). For compound callsigns the DXCC entity is determined by
+ * whichever part is NOT a full callsign — i.e. the portable/operating prefix.
+ *
+ * Examples:
+ *   PJ2/W9WI  → PJ2   (operating from Curaçao, not USA)
+ *   DL/W1ABC  → DL    (operating from Germany)
+ *   W1ABC/DL  → DL    (same — order doesn't matter)
+ *   5Z4/OZ6ABL → 5Z4  (operating from Kenya)
+ *   UA1TAN/M  → UA1TAN (mobile, same entity)
+ *   W9WI/P    → W9WI  (portable, same entity)
+ *   W9WI/6    → W9WI  (district change only)
+ */
+function extractOperatingPrefix(raw) {
+  if (!raw || typeof raw !== 'string') return raw || '';
+  const call = raw.toUpperCase().trim();
+
+  if (!call.includes('/')) return call;
+
+  const parts = call.split('/');
+  if (parts.length !== 2) return parts[0] || call;
+
+  const [left, right] = parts;
+
+  // If right is a modifier or single-digit district, operating entity = left
+  const MODIFIERS = new Set(['M','P','QRP','MM','AM','R','T','B','BCN','LH','A','E','J','AG','AE','KT']);
+  if (MODIFIERS.has(right) || /^\d$/.test(right)) return left;
+
+  // A "full callsign" ends with letters after a digit: W9WI, OZ6ABL, AA7BQ
+  // A "DXCC prefix" either ends with a digit (PJ2, 5Z4, 3B9) or is pure letters (DL, VK, G)
+  const isFullCall = (s) => /^[A-Z]{1,3}\d{1,4}[A-Z]{1,4}$/.test(s);
+
+  const leftFull = isFullCall(left);
+  const rightFull = isFullCall(right);
+
+  if (rightFull && !leftFull) return left;  // PJ2/W9WI → PJ2, DL/W1ABC → DL
+  if (leftFull && !rightFull) return right; // W1ABC/DL → DL
+
+  // Both look like full calls or neither does — default to left
+  return left;
 }
 
 // ── QRZ XML API Session Manager ──
