@@ -14,6 +14,7 @@ export const POTAPanel = ({
   showLabelsOnMap = true,
   onToggleLabelsOnMap,
   onSpotClick,
+  onHoverSpot,
 }) => {
   return (
     <ActivatePanel
@@ -28,6 +29,7 @@ export const POTAPanel = ({
       showLabelsOnMap={showLabelsOnMap}
       onToggleLabelsOnMap={onToggleLabelsOnMap}
       onSpotClick={onSpotClick}
+      onHoverSpot={onHoverSpot}
     />
   );
 };
