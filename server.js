@@ -1927,6 +1927,56 @@ app.get('/api/solar-indices', async (req, res) => {
   }
 });
 
+// NASA Dial-A-Moon — proxies photorealistic moon image from NASA SVS
+// Image changes hourly, cached for 1 hour to avoid hammering NASA
+let moonImageCache = { buffer: null, contentType: null, timestamp: 0 };
+const MOON_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+app.get('/api/moon-image', async (req, res) => {
+  try {
+    // Return cached image if fresh
+    if (moonImageCache.buffer && Date.now() - moonImageCache.timestamp < MOON_CACHE_TTL) {
+      res.set('Content-Type', moonImageCache.contentType);
+      res.set('Cache-Control', 'public, max-age=3600');
+      return res.send(moonImageCache.buffer);
+    }
+
+    // Build UTC timestamp for Dial-A-Moon API (rounds to nearest hour)
+    const now = new Date();
+    const ts = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+
+    // Step 1: Get image URL from NASA SVS Dial-A-Moon API
+    const apiUrl = `https://svs.gsfc.nasa.gov/api/dialamoon/${ts}`;
+    const metaResponse = await fetch(apiUrl);
+    if (!metaResponse.ok) throw new Error(`Dial-A-Moon API returned ${metaResponse.status}`);
+    const meta = await metaResponse.json();
+
+    const imageUrl = meta?.image?.url;
+    if (!imageUrl) throw new Error('No image URL in Dial-A-Moon response');
+
+    // Step 2: Fetch the actual moon image
+    const imgResponse = await fetch(imageUrl);
+    if (!imgResponse.ok) throw new Error(`Moon image fetch returned ${imgResponse.status}`);
+    const buffer = Buffer.from(await imgResponse.arrayBuffer());
+    const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+
+    // Cache it
+    moonImageCache = { buffer, contentType, timestamp: Date.now() };
+
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(buffer);
+  } catch (error) {
+    logErrorOnce('Moon Image', error.message);
+    // Return stale cache on error
+    if (moonImageCache.buffer) {
+      res.set('Content-Type', moonImageCache.contentType);
+      return res.send(moonImageCache.buffer);
+    }
+    res.status(500).json({ error: 'Failed to fetch moon image' });
+  }
+});
+
 // DXpedition Calendar - fetches from NG3K ADXO plain text version
 let dxpeditionCache = { data: null, timestamp: 0, maxAge: 30 * 60 * 1000 }; // 30 min cache
 
