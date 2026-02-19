@@ -15,7 +15,7 @@ export const metadata = {
     tailTimeMins: 15,
     showTracks: true,
     showFootprints: true,
-  }
+  },
 };
 
 export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, config, units }) => {
@@ -36,9 +36,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
 
   // Helper to add/remove satellites from the active view
   const toggleSatellite = (name) => {
-    setSelectedSats(prev => 
-      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
-    );
+    setSelectedSats((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
   };
 
   // Bridge to the popup window HTML
@@ -50,17 +48,19 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     try {
       const response = await fetch('/api/satellites/tle');
       const data = await response.json();
-      
+
       const observerGd = {
         latitude: satellite.degreesToRadians(config?.lat || 43.44),
         longitude: satellite.degreesToRadians(config?.lon || -88.63),
-        height: (config?.alt || 260) / 1000
+        height: (config?.alt || 260) / 1000,
       };
 
-      const satArray = Object.keys(data).map(name => {
+      const satArray = Object.keys(data).map((name) => {
         const satData = data[name];
         let isVisible = false;
-        let az = 0, el = 0, range = 0;
+        let az = 0,
+          el = 0,
+          range = 0;
         const leadTrack = [];
 
         if (satData.line1 && satData.line2) {
@@ -72,7 +72,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
           if (positionAndVelocity.position) {
             const positionEcf = satellite.eciToEcf(positionAndVelocity.position, gmst);
             const lookAngles = satellite.ecfToLookAngles(observerGd, positionEcf);
-            
+
             az = lookAngles.azimuth * (180 / Math.PI);
             el = lookAngles.elevation * (180 / Math.PI);
             range = lookAngles.rangeSat;
@@ -86,22 +86,19 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
             if (posVel.position) {
               const fGmst = satellite.gstime(futureTime);
               const geodetic = satellite.eciToGeodetic(posVel.position, fGmst);
-              leadTrack.push([
-                satellite.degreesLat(geodetic.latitude),
-                satellite.degreesLong(geodetic.longitude)
-              ]);
+              leadTrack.push([satellite.degreesLat(geodetic.latitude), satellite.degreesLong(geodetic.longitude)]);
             }
           }
         }
 
-        return { 
-          ...satData, 
-          name, 
-          visible: isVisible, 
-          azimuth: az, 
-          elevation: el, 
+        return {
+          ...satData,
+          name,
+          visible: isVisible,
+          azimuth: az,
+          elevation: el,
           range: range,
-          leadTrack 
+          leadTrack,
         };
       });
 
@@ -111,7 +108,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     }
   };
 
-const updateInfoWindow = () => {
+  const updateInfoWindow = () => {
     const winId = 'sat-data-window';
     const container = map.getContainer();
     let win = container.querySelector(`#${winId}`);
@@ -219,13 +216,18 @@ const updateInfoWindow = () => {
       </div>
     `;
 
-    win.innerHTML = titleBar + clearAllBtn + `<div style="padding: 0 12px 8px;">` + activeSats.map((sat) => {
-      const isVisible = sat.visible === true;
-      const isImp = units === 'imperial';
-      const conv = isImp ? 0.621371 : 1;
-      const distUnit = isImp ? ' mi' : ' km';
+    win.innerHTML =
+      titleBar +
+      clearAllBtn +
+      `<div style="padding: 0 12px 8px;">` +
+      activeSats
+        .map((sat) => {
+          const isVisible = sat.visible === true;
+          const isImp = units === 'imperial';
+          const conv = isImp ? 0.621371 : 1;
+          const distUnit = isImp ? ' mi' : ' km';
 
-      return `
+          return `
         <div class="sat-card" style="border-bottom: 1px solid #004444; margin-bottom: 10px; padding-bottom: 8px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
             <strong style="color:#ffffff; font-size: 14px;">${sat.name}</strong>
@@ -244,7 +246,9 @@ const updateInfoWindow = () => {
           </table>
         </div>
       `;
-    }).join('') + `</div>`;
+        })
+        .join('') +
+      `</div>`;
   };
 
   const renderSatellites = () => {
@@ -254,11 +258,11 @@ const updateInfoWindow = () => {
 
     const globalOpacity = opacity !== undefined ? opacity : 1.0;
 
-    satellites.forEach(sat => {
+    satellites.forEach((sat) => {
       const isSelected = selectedSats.includes(sat.name);
 
       if (isSelected && config?.showFootprints !== false && sat.alt) {
-        const EARTH_RADIUS = 6371; 
+        const EARTH_RADIUS = 6371;
         const centralAngle = Math.acos(EARTH_RADIUS / (EARTH_RADIUS + sat.alt));
         const footprintRadiusMeters = centralAngle * EARTH_RADIUS * 1000;
         const footColor = sat.visible === true ? '#00ff00' : '#00ffff';
@@ -271,41 +275,60 @@ const updateInfoWindow = () => {
             opacity: globalOpacity,
             fillColor: footColor,
             fillOpacity: globalOpacity * 0.15,
-            interactive: false
+            interactive: false,
           }).addTo(layerGroupRef.current);
         });
       }
 
       if (config?.showTracks !== false && sat.track) {
-        const pathCoords = sat.track.map(p => [p[0], p[1]]);
-        replicatePath(pathCoords).forEach(coords => {
+        const pathCoords = sat.track.map((p) => [p[0], p[1]]);
+        replicatePath(pathCoords).forEach((coords) => {
           if (isSelected) {
             for (let i = 0; i < coords.length - 1; i++) {
-              const fade = (i / coords.length);
-              window.L.polyline([coords[i], coords[i+1]], { 
-                color: '#00ffff', weight: 6, opacity: fade * 0.3 * globalOpacity, lineCap: 'round', interactive: false 
+              const fade = i / coords.length;
+              window.L.polyline([coords[i], coords[i + 1]], {
+                color: '#00ffff',
+                weight: 6,
+                opacity: fade * 0.3 * globalOpacity,
+                lineCap: 'round',
+                interactive: false,
               }).addTo(layerGroupRef.current);
-              window.L.polyline([coords[i], coords[i+1]], { 
-                color: '#ffffff', weight: 2, opacity: fade * globalOpacity, lineCap: 'round', interactive: false 
+              window.L.polyline([coords[i], coords[i + 1]], {
+                color: '#ffffff',
+                weight: 2,
+                opacity: fade * globalOpacity,
+                lineCap: 'round',
+                interactive: false,
               }).addTo(layerGroupRef.current);
             }
           } else {
-            window.L.polyline(coords, { color: '#00ffff', weight: 1, opacity: 0.15 * globalOpacity, dashArray: '5, 10', interactive: false }).addTo(layerGroupRef.current);
+            window.L.polyline(coords, {
+              color: '#00ffff',
+              weight: 1,
+              opacity: 0.15 * globalOpacity,
+              dashArray: '5, 10',
+              interactive: false,
+            }).addTo(layerGroupRef.current);
           }
         });
 
         if (isSelected && sat.leadTrack && sat.leadTrack.length > 0) {
-          const leadCoords = sat.leadTrack.map(p => [p[0], p[1]]);
-          replicatePath(leadCoords).forEach(lCoords => {
+          const leadCoords = sat.leadTrack.map((p) => [p[0], p[1]]);
+          replicatePath(leadCoords).forEach((lCoords) => {
             window.L.polyline(lCoords, {
-              color: '#ffff00', weight: 3, opacity: 0.8 * globalOpacity, dashArray: '8, 12', lineCap: 'round', interactive: false
+              color: '#ffff00',
+              weight: 3,
+              opacity: 0.8 * globalOpacity,
+              dashArray: '8, 12',
+              lineCap: 'round',
+              interactive: false,
             }).addTo(layerGroupRef.current);
           });
         }
       }
 
       replicatePoint(sat.lat, sat.lon).forEach((pos) => {
-        const marker = window.L.marker(pos, { 
+        const marker = window.L.marker(pos, {
           icon: window.L.divIcon({
             className: 'sat-marker',
             html: `<div style="display:flex; flex-direction:column; align-items:center; opacity: ${globalOpacity};">
@@ -313,9 +336,9 @@ const updateInfoWindow = () => {
                      <div class="sat-label" style="${isSelected ? 'color: #ffffff; font-weight: bold;' : ''}">${sat.name}</div>
                    </div>`,
             iconSize: [80, 50],
-            iconAnchor: [40, 25]
+            iconAnchor: [40, 25],
           }),
-          zIndexOffset: isSelected ? 10000 : 1000
+          zIndexOffset: isSelected ? 10000 : 1000,
         });
 
         marker.on('click', (e) => {
@@ -333,7 +356,7 @@ const updateInfoWindow = () => {
   useEffect(() => {
     if (!map) return;
     if (!layerGroupRef.current) layerGroupRef.current = window.L.layerGroup().addTo(map);
-    
+
     if (enabled) {
       fetchSatellites();
       const interval = setInterval(fetchSatellites, 5000);
