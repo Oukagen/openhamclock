@@ -816,7 +816,7 @@ nano .env          # Set your callsign and locator
 ./restart.sh       # Apply changes
 ```
 
-The Pi setup script installs Node.js 20, clones the repository, builds the frontend, creates a systemd service (`openhamclock.service`) for automatic startup, and optionally configures Chromium in kiosk mode.
+The Pi setup script installs Node.js 20, clones the repository, builds the frontend, creates a systemd service (`openhamclock.service`) for automatic startup, and optionally configures Chromium in kiosk mode. It also installs `fonts-noto-color-emoji` so that all emoji icons display correctly in Chromium.
 
 ### Docker
 
@@ -1164,6 +1164,15 @@ A: Set `LAYOUT=classic` in `.env` (or select it in Settings). The Classic layout
 
 **Q: I can't find the `.env` file — where is it?**
 A: The `.env` file is in the root OpenHamClock directory (same folder as `server.js`). Files starting with `.` are hidden by default — use `ls -la` in a terminal to see it, or `Ctrl+H` in a Linux file manager. If it doesn't exist yet, run `npm start` once (it's auto-created from `.env.example`) or copy it manually: `cp .env.example .env`. Most settings can also be changed through the browser Settings panel without editing `.env` at all.
+
+**Q: Icons and emoji are showing as boxes or missing on Linux / Raspberry Pi — how do I fix it?**
+A: OpenHamClock uses emoji for icons throughout the interface (weather symbols, band indicators, satellite markers, and more). On Linux, emoji rendering depends on a color emoji font being installed on the **machine running the browser** — not the server. Install the Noto Color Emoji font to fix it:
+
+```bash
+sudo apt install fonts-noto-color-emoji
+```
+
+Then restart your browser (or reboot if running in kiosk mode). The Raspberry Pi setup script now installs this automatically. On Windows and macOS, emoji fonts are bundled with the OS and no action is needed.
 
 ---
 

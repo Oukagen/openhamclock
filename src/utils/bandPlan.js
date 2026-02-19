@@ -47,9 +47,13 @@ export const getSideband = (hz) => {
 };
 
 /**
- * Map a generic mode (e.g. 'FT8', 'CW') to a rig-specific mode (e.g. 'DATA-USB', 'CW-LSB')
- * based on frequency conventions.
- * @param {string} mode - The mode string (e.g. 'FT8', 'CW', 'SSB')
+ * Map a generic mode (e.g. 'FT8', 'DATA', 'SSB') to a rig-specific mode
+ * (e.g. 'DATA-USB', 'USB') based on frequency conventions.
+ *
+ * CW is passed through unchanged — the rig-listener protocol layer (Yaesu MD03;,
+ * Kenwood MD3;, Icom 0x03) handles it correctly for all supported radios.
+ *
+ * @param {string} mode - The mode string (e.g. 'FT8', 'CW', 'SSB', 'DATA')
  * @param {number} freq - The frequency in Hz
  * @returns {string} - The mapped mode string
  */
@@ -58,16 +62,26 @@ export const mapModeToRig = (mode, freq) => {
   const m = mode.toUpperCase();
   const sb = getSideband(freq);
 
-  const suffix = sb === 'USB' ? 'U' : 'L';
+  // CW: pass through as-is — rig-listener translates to MD03; (Yaesu),
+  // MD3; (Kenwood/Elecraft), or CI-V 0x03 (Icom) for all supported radios.
+  if (m === 'CW' || m === 'CW-R') return m;
 
-  // List of digital modes to map to sideband
-  const digitalModes = ['FT8', 'FT4', 'JS8', 'WSPR', 'JT65', 'JT9', 'PSK31', 'PSK63', 'RTTY', 'DATA', 'PKT'];
+  // FM and AM: always pass through unchanged
+  if (m === 'FM' || m === 'AM' || m === 'WFM') return m;
 
-  // Map Digital, CW, and generic SSB to specific sideband
-  if (digitalModes.includes(m) || m === 'CW' || m === 'SSB') {
-    return sb;
+  // Already a fully-qualified mode: USB, LSB, DATA-USB, DATA-LSB, etc.
+  if (m === 'USB' || m === 'LSB') return m;
+  if (m === 'DATA-USB' || m === 'DATA-LSB') return m;
+
+  // Digital/data modes → DATA-USB or DATA-LSB based on band convention
+  const digitalModes = ['DATA', 'FT8', 'FT4', 'JS8', 'WSPR', 'JT65', 'JT9', 'PSK31', 'PSK63', 'RTTY', 'PKT'];
+  if (digitalModes.includes(m)) {
+    return sb === 'USB' ? 'DATA-USB' : 'DATA-LSB';
   }
 
-  // Pass through others (USB, LSB, AM, FM)
+  // Generic SSB → resolved sideband
+  if (m === 'SSB') return sb;
+
+  // Unknown modes: pass through so the rig can decide
   return m;
 };

@@ -27,6 +27,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     return saved ? JSON.parse(saved) : [];
   });
   const [winPos, setWinPos] = useState({ top: 50, right: 10 });
+  const [winMinimized, setWinMinimized] = useState(false);
 
   // Sync to session storage
   useEffect(() => {
@@ -124,18 +125,16 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
       Object.assign(win.style, {
         position: 'absolute',
         width: '260px',
-        maxHeight: 'calc(100% - 80px)',
         backgroundColor: 'rgba(0, 15, 15, 0.95)',
         color: '#00ffff',
-        padding: '12px',
         borderRadius: '4px',
         border: '1px solid #00ffff',
         zIndex: '1000',
-        overflowY: 'auto',
         fontFamily: 'monospace',
         pointerEvents: 'auto',
         boxShadow: '0 0 15px rgba(0,0,0,0.7)',
         cursor: 'default',
+        overflow: 'hidden',
       });
       container.appendChild(win);
 
@@ -145,7 +144,6 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         if (e.ctrlKey) {
           isDragging = true;
           win.style.cursor = 'move';
-          // --- STOP MAP DRAGGING ---
           if (map.dragging) map.dragging.disable();
           e.preventDefault();
           e.stopPropagation();
@@ -157,7 +155,6 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         const rect = container.getBoundingClientRect();
         const x = rect.right - e.clientX;
         const y = e.clientY - rect.top;
-
         win.style.right = `${x - 10}px`;
         win.style.top = `${y - 10}px`;
       };
@@ -166,9 +163,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         if (isDragging) {
           isDragging = false;
           win.style.cursor = 'default';
-          // --- RE-ENABLE MAP DRAGGING ---
           if (map.dragging) map.dragging.enable();
-
           setWinPos({
             top: parseInt(win.style.top),
             right: parseInt(win.style.right),
@@ -182,24 +177,50 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
 
     const activeSats = satellites.filter((s) => selectedSats.includes(s.name));
 
-    const clearAllBtn = `
-      <div style="margin-bottom: 12px; border-bottom: 2px solid #004444; padding-bottom: 8px; display: flex; flex-direction: column; align-items: center; gap: 5px;">
-        <button onclick="sessionStorage.removeItem('selected_satellites'); window.location.reload();" 
-                style="background: #440000; border: 1px solid #ff4444; color: #ff4444; cursor: pointer; padding: 4px 10px; font-size: 10px; border-radius: 3px; font-weight: bold;">
-          CLEAR ALL FOOTPRINTS
+    // Expose minimize toggle so the inline onclick can reach it
+    window.__satWinToggleMinimize = () => setWinMinimized((prev) => !prev);
+
+    const titleBar = `
+      <div style="display:flex; justify-content:space-between; align-items:center;
+                  padding: 8px 10px; border-bottom: 1px solid #004444; background: rgba(0,40,40,0.6);">
+        <span style="font-size:11px; color:#00ffff; letter-spacing:0.05em;">
+          🛰 ${activeSats.length} SAT${activeSats.length !== 1 ? 'S' : ''}
+        </span>
+        <button onclick="window.__satWinToggleMinimize()"
+                title="${winMinimized ? 'Expand' : 'Minimize'}"
+                style="background:none; border:1px solid #004444; color:#00cccc; cursor:pointer;
+                       font-size:13px; line-height:1; padding:1px 6px; border-radius:3px;">
+          ${winMinimized ? '▲' : '▼'}
         </button>
-        <span style="font-size: 9px; color: #888;">Ctrl + Drag to move this box</span>
       </div>
     `;
 
-    win.innerHTML =
-      clearAllBtn +
-      activeSats
-        .map((sat) => {
-          const isVisible = sat.visible === true;
-          const isImp = units === 'imperial';
-          const conv = isImp ? 0.621371 : 1;
-          const distUnit = isImp ? ' mi' : ' km';
+    if (winMinimized) {
+      win.style.maxHeight = '';
+      win.style.overflowY = 'hidden';
+      win.innerHTML = titleBar;
+      return;
+    }
+
+    win.style.maxHeight = 'calc(100% - 80px)';
+    win.style.overflowY = 'auto';
+
+    const clearAllBtn = `
+      <div style="margin: 10px 12px 8px; display: flex; flex-direction: column; align-items: center; gap: 5px;">
+        <button onclick="sessionStorage.removeItem('selected_satellites'); window.location.reload();"
+                style="background: #440000; border: 1px solid #ff4444; color: #ff4444; cursor: pointer;
+                       padding: 4px 10px; font-size: 10px; border-radius: 3px; font-weight: bold; width: 100%;">
+          CLEAR ALL FOOTPRINTS
+        </button>
+        <span style="font-size: 9px; color: #888;">Ctrl + Drag to move</span>
+      </div>
+    `;
+
+    win.innerHTML = titleBar + clearAllBtn + `<div style="padding: 0 12px 8px;">` + activeSats.map((sat) => {
+      const isVisible = sat.visible === true;
+      const isImp = units === 'imperial';
+      const conv = isImp ? 0.621371 : 1;
+      const distUnit = isImp ? ' mi' : ' km';
 
           return `
         <div class="sat-card" style="border-bottom: 1px solid #004444; margin-bottom: 10px; padding-bottom: 8px;">
@@ -220,8 +241,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
           </table>
         </div>
       `;
-        })
-        .join('');
+    }).join('') + `</div>`;
   };
 
   const renderSatellites = () => {
@@ -343,7 +363,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
 
   useEffect(() => {
     if (enabled) renderSatellites();
-  }, [satellites, selectedSats, units, opacity, config]);
+  }, [satellites, selectedSats, units, opacity, config, winMinimized]);
 
   return null;
 };

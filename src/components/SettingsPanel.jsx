@@ -53,6 +53,7 @@ export const SettingsPanel = ({
   const [rigHost, setRigHost] = useState(config?.rigControl?.host || 'http://localhost');
   const [rigPort, setRigPort] = useState(config?.rigControl?.port || 5555);
   const [tuneEnabled, setTuneEnabled] = useState(config?.rigControl?.tuneEnabled || false);
+  const [autoMode, setAutoMode] = useState(config?.rigControl?.autoMode !== false);
   const [satelliteSearch, setSatelliteSearch] = useState('');
   const isLocalInstall = useLocalInstall();
   const [rotatorEnabled, setRotatorEnabled] = useState(() => {
@@ -137,6 +138,7 @@ export const SettingsPanel = ({
       setRigHost(config.rigControl?.host || 'http://localhost');
       setRigPort(config.rigControl?.port || 5555);
       setTuneEnabled(config.rigControl?.tuneEnabled || false);
+      setAutoMode(config.rigControl?.autoMode !== false);
       if (config.location?.lat && config.location?.lon) {
         setGridSquare(calculateGridSquare(config.location.lat, config.location.lon));
       }
@@ -349,7 +351,7 @@ export const SettingsPanel = ({
       lowMemoryMode,
       units,
       propagation: { mode: propMode, power: parseFloat(propPower) || 100 },
-      rigControl: { enabled: rigEnabled, host: rigHost, port: parseInt(rigPort) || 5555, tuneEnabled },
+      rigControl: { enabled: rigEnabled, host: rigHost, port: parseInt(rigPort) || 5555, tuneEnabled, autoMode }
     });
     onClose();
   };
@@ -1271,6 +1273,24 @@ export const SettingsPanel = ({
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={autoMode}
+                      onChange={(e) => setAutoMode(e.target.checked)}
+                      style={{ marginRight: '8px' }}
+                    />
+                    <div>
+                      <span style={{ color: 'var(--text-primary)', fontSize: '13px' }}>
+                        {t('station.settings.rigControl.autoMode')}
+                      </span>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                        {t('station.settings.rigControl.autoMode.hint')}
+                      </div>
+                    </div>
+                  </div>
                   </>
                 )}
               </div>
@@ -2941,7 +2961,12 @@ export const SettingsPanel = ({
                                     const url = URL.createObjectURL(blob);
                                     const a = document.createElement('a');
                                     a.href = url;
-                                    a.download = `hamclock-profile-${name.replace(/\s+/g, '-').toLowerCase()}.json`;
+                                    a.download = (() => {
+                                      const now = new Date();
+                                      const date = now.toISOString().split('T')[0];
+                                      const time = now.toTimeString().slice(0, 8).replace(/:/g, '');
+                                      return `hamclock-profile-${name.replace(/\s+/g, '-').toLowerCase()}-${date}-${time}.json`;
+                                    })();
                                     a.click();
                                     URL.revokeObjectURL(url);
                                     setProfileMessage({ type: 'success', text: `Exported "${name}"` });
@@ -3316,7 +3341,12 @@ export const SettingsPanel = ({
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `hamclock-current-${new Date().toISOString().split('T')[0]}.json`;
+                    a.download = (() => {
+                        const now = new Date();
+                        const date = now.toISOString().split('T')[0];
+                        const time = now.toTimeString().slice(0, 8).replace(/:/g, '');
+                        return `hamclock-current-${date}-${time}.json`;
+                      })();
                     a.click();
                     URL.revokeObjectURL(url);
                     setProfileMessage({ type: 'success', text: 'Exported current state' });

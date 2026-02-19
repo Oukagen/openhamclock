@@ -99,7 +99,7 @@ export const POTAPanel = ({
                 key={`${spot.call}-${spot.ref}-${i}`}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '62px 62px 58px 1fr',
+                  gridTemplateColumns: '62px 50px 58px 1fr',
                   gap: '4px',
                   padding: '3px 0',
                   borderBottom: i < data.length - 1 ? '1px solid var(--border-color)' : 'none',
@@ -121,7 +121,7 @@ export const POTAPanel = ({
                   <CallsignLink call={spot.call} color="#44cc44" fontWeight="600" />
                 </span>
                 <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {`${spot.ref} - ${spot.name}`}
+                  {spot.locationDesc || spot.ref}
                 </span>
                 <span style={{ color: 'var(--accent-cyan)', textAlign: 'right' }}>
                   {(() => {
