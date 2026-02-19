@@ -347,7 +347,20 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
     );
   };
 
-  // Lunar phase renderer
+  // Lunar phase renderer — uses live NASA SVS Dial-A-Moon imagery
+  const [moonImageUrl, setMoonImageUrl] = useState(null);
+  const [moonImageError, setMoonImageError] = useState(false);
+
+  useEffect(() => {
+    const fetchMoonImage = () => {
+      setMoonImageUrl(`/api/moon-image?t=${Math.floor(Date.now() / 3600000)}`);
+      setMoonImageError(false);
+    };
+    fetchMoonImage();
+    const interval = setInterval(fetchMoonImage, 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const renderLunar = () => {
     const now = new Date();
     const phase = getMoonPhase(now); // 0-1, 0=new, 0.5=full
@@ -379,118 +392,60 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
     const nextFull = findNextPhase(0.5, 'Full');
     const nextNew = findNextPhase(0.0, 'New');
 
-    // SVG moon — uses a crescent/gibbous mask technique
-    // phase 0=new(dark), 0.25=first quarter(right lit), 0.5=full(all lit), 0.75=last quarter(left lit)
-    const R = 60; // moon radius
+    const R = 60;
     const CX = 70,
       CY = 70;
 
-    // The terminator curve is an ellipse whose x-radius varies with phase
-    // At new moon (0): fully dark. At full (0.5): fully lit.
-    // phase 0-0.5: right side lit (waxing), 0.5-1: left side lit (waning)
-    const angle = phase * 2 * Math.PI;
-    const terminatorX = R * Math.cos(angle); // ranges from R (new) through 0 (quarter) to -R (full) and back
-
-    // Build the lit area path
-    // Right half arc (from top to bottom) is always an arc of radius R
-    // Left boundary (terminator) is an ellipse with rx = |terminatorX|
-    const buildMoonPath = () => {
-      // Lit portion: we draw two arcs — the outer limb and the terminator
-      // For waxing (0 < phase < 0.5): right side is lit
-      // For waning (0.5 < phase < 1): left side is lit
-
-      if (phase < 0.01 || phase > 0.99) {
-        // New moon — no lit area
-        return null;
-      }
-      if (phase > 0.49 && phase < 0.51) {
-        // Full moon — entire circle lit
-        return `M${CX},${CY - R} A${R},${R} 0 1,1 ${CX},${CY + R} A${R},${R} 0 1,1 ${CX},${CY - R}`;
-      }
-
-      const absTermX = Math.abs(terminatorX);
-
-      if (phase < 0.5) {
-        // Waxing — right side lit, terminator concave (sweep=0)
-        // At phase≈0: absTermX≈0, ellipse collapses to a line → nearly no lit area (dark)
-        // At phase=0.25: absTermX=R, concave arc gives exactly right half lit
-        return `M${CX},${CY - R} A${R},${R} 0 0,1 ${CX},${CY + R} A${absTermX},${R} 0 0,0 ${CX},${CY - R}`;
-      } else {
-        // Waning — left side lit, terminator convex (sweep=1)
-        // At phase=0.75: absTermX=R, convex arc gives exactly left half lit
-        // At phase≈1: absTermX≈0, collapses to line → nearly no lit area (dark)
-        return `M${CX},${CY - R} A${R},${R} 0 0,0 ${CX},${CY + R} A${absTermX},${R} 0 0,1 ${CX},${CY - R}`;
-      }
-    };
-
-    const litPath = buildMoonPath();
-
     return (
       <div>
-        {/* Moon SVG */}
+        {/* Moon image — live NASA SVS Dial-A-Moon render */}
         <div style={{ textAlign: 'center', marginBottom: '6px' }}>
           <svg width="140" height="140" viewBox="0 0 140 140" style={{ display: 'block', margin: '0 auto' }}>
             <defs>
-              {/* Crater texture */}
-              <radialGradient id="moonSurface" cx="40%" cy="35%" r="60%">
-                <stop offset="0%" stopColor="#e8e4d8" />
-                <stop offset="100%" stopColor="#c8c0ae" />
-              </radialGradient>
-              <radialGradient id="crater1" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#b0a898" />
-                <stop offset="100%" stopColor="#c4bca8" />
-              </radialGradient>
-              {/* Clip to circle */}
               <clipPath id="moonClip">
                 <circle cx={CX} cy={CY} r={R} />
               </clipPath>
             </defs>
 
-            {/* Dark side (always full circle, dark) */}
-            <circle cx={CX} cy={CY} r={R} fill="#1a1a2e" stroke="#333" strokeWidth="1.5" />
+            {/* Dark background (visible while loading or on error) */}
+            <circle cx={CX} cy={CY} r={R} fill="#0a0a14" />
 
-            {/* Lit surface with craters — clipped to lit path */}
-            {litPath && (
-              <g clipPath="url(#moonClip)">
-                <path d={litPath} fill="url(#moonSurface)" />
-                {/* Mare (dark patches) */}
-                <ellipse
-                  cx={CX - 12}
-                  cy={CY - 8}
-                  rx="18"
-                  ry="14"
-                  fill="#b8b0a0"
-                  opacity="0.5"
-                  clipPath="url(#moonClip)"
-                />
-                <ellipse
-                  cx={CX + 15}
-                  cy={CY + 10}
-                  rx="12"
-                  ry="10"
-                  fill="#b0a898"
-                  opacity="0.4"
-                  clipPath="url(#moonClip)"
-                />
-                <ellipse
-                  cx={CX - 5}
-                  cy={CY + 20}
-                  rx="14"
-                  ry="8"
-                  fill="#ada598"
-                  opacity="0.35"
-                  clipPath="url(#moonClip)"
-                />
-                {/* Craters */}
-                <circle cx={CX + 20} cy={CY - 20} r="6" fill="url(#crater1)" opacity="0.5" />
-                <circle cx={CX - 25} cy={CY + 5} r="4" fill="url(#crater1)" opacity="0.4" />
-                <circle cx={CX + 8} cy={CY + 25} r="5" fill="url(#crater1)" opacity="0.45" />
-                <circle cx={CX - 10} cy={CY - 25} r="3.5" fill="url(#crater1)" opacity="0.35" />
-                <circle cx={CX + 25} cy={CY + 5} r="3" fill="url(#crater1)" opacity="0.3" />
-              </g>
+            {/* NASA moon image — already shows correct phase, libration, and illumination */}
+            {moonImageUrl && !moonImageError && (
+              <image
+                href={moonImageUrl}
+                x={CX - R}
+                y={CY - R}
+                width={R * 2}
+                height={R * 2}
+                clipPath="url(#moonClip)"
+                preserveAspectRatio="xMidYMid slice"
+                onError={() => setMoonImageError(true)}
+              />
             )}
 
-            {/* Subtle glow */}
+            {/* Fallback: simple SVG moon if image fails */}
+            {moonImageError &&
+              (() => {
+                const angle = phase * 2 * Math.PI;
+                const terminatorX = R * Math.cos(angle);
+                const absTermX = Math.abs(terminatorX);
+                let litPath = null;
+                if (phase >= 0.01 && phase <= 0.99) {
+                  if (phase > 0.49 && phase < 0.51) {
+                    litPath = `M${CX},${CY - R} A${R},${R} 0 1,1 ${CX},${CY + R} A${R},${R} 0 1,1 ${CX},${CY - R}`;
+                  } else if (phase < 0.5) {
+                    litPath = `M${CX},${CY - R} A${R},${R} 0 0,1 ${CX},${CY + R} A${absTermX},${R} 0 0,0 ${CX},${CY - R}`;
+                  } else {
+                    litPath = `M${CX},${CY - R} A${R},${R} 0 0,0 ${CX},${CY + R} A${absTermX},${R} 0 0,1 ${CX},${CY - R}`;
+                  }
+                }
+                return litPath ? (
+                  <path d={litPath} fill="#c8c0ae" clipPath="url(#moonClip)" />
+                ) : null;
+              })()}
+
+            {/* Subtle outer glow */}
             <circle cx={CX} cy={CY} r={R + 3} fill="none" stroke="rgba(200,200,180,0.1)" strokeWidth="4" />
           </svg>
         </div>
@@ -508,6 +463,13 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
           >
             {illumination}% illuminated
           </div>
+        </div>
+
+        {/* Credit line */}
+        <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+          <span style={{ fontSize: '8px', color: 'var(--text-muted)', opacity: 0.6 }}>
+            NASA/SVS Dial-A-Moon
+          </span>
         </div>
 
         {/* Next phases */}
