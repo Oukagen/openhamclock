@@ -34,6 +34,11 @@ const CHANGELOG = [
         title: 'Merge Conflict Cleanup',
         desc: 'Fixed a cascade of merge artifacts from a stale-branch PR: duplicate zoom buttons in panel headers (A− A− A+ → A− A+), triplicated switch/case blocks in the panel factory, duplicate variable declarations in the Solar panel, and a broken server-side cache check that crashed Node on startup. All source files now pass automated syntax and brace-balance checks.',
       },
+      {
+        icon: '🐛',
+        title: 'WSJT-X & PSK Reporter Duplicate Spots Fixed',
+        desc: 'Fixed #396 — WSJT-X decodes and QSOs appeared duplicated in the panel. Decode IDs were timestamp-based, so the same message with a 1ms time difference bypassed dedup. IDs are now content-based (time + freq + message). QSO logging checks for duplicate call + frequency + mode within 60 seconds. PSK Reporter MQTT spot ingestion now deduplicates by sender + receiver + band + frequency before buffering, preventing duplicate spots from being relayed to clients via SSE. Client-side merge in both hooks uses content-based matching as a final safety net.',
+      },
     ],
   },
   {

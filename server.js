@@ -6076,13 +6076,24 @@ function pskMqttConnect() {
           lon: receiverLoc?.lon,
           direction: 'tx',
         };
+        // Dedup: skip if same sender+receiver+band+freq already in buffer or recent
+        const spotKey = `${sc}|${rc}|${spot.band}|${freq}`;
         if (!pskMqtt.spotBuffer.has(scUpper)) pskMqtt.spotBuffer.set(scUpper, []);
-        pskMqtt.spotBuffer.get(scUpper).push(txSpot);
+        const scBuf = pskMqtt.spotBuffer.get(scUpper);
+        const isDupBuf = scBuf.some((s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === spotKey);
+        if (!isDupBuf) {
+          scBuf.push(txSpot);
+        }
         // Also add to recent spots (capped at insert time to prevent unbounded growth)
         if (!pskMqtt.recentSpots.has(scUpper)) pskMqtt.recentSpots.set(scUpper, []);
         const scRecent = pskMqtt.recentSpots.get(scUpper);
-        scRecent.push(txSpot);
-        if (scRecent.length > 250) pskMqtt.recentSpots.set(scUpper, scRecent.slice(-200));
+        const isDupRecent = scRecent.some(
+          (s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === spotKey && Math.abs(s.timestamp - spot.timestamp) < 30000,
+        );
+        if (!isDupRecent) {
+          scRecent.push(txSpot);
+          if (scRecent.length > 250) pskMqtt.recentSpots.set(scUpper, scRecent.slice(-200));
+        }
       }
 
       // Buffer for RX subscribers (rc is the callsign being tracked)
@@ -6094,12 +6105,23 @@ function pskMqttConnect() {
           lon: senderLoc?.lon,
           direction: 'rx',
         };
+        // Dedup: skip if same sender+receiver+band+freq already in buffer or recent
+        const rxSpotKey = `${sc}|${rc}|${spot.band}|${freq}`;
         if (!pskMqtt.spotBuffer.has(rcUpper)) pskMqtt.spotBuffer.set(rcUpper, []);
-        pskMqtt.spotBuffer.get(rcUpper).push(rxSpot);
+        const rcBuf = pskMqtt.spotBuffer.get(rcUpper);
+        const isDupRxBuf = rcBuf.some((s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === rxSpotKey);
+        if (!isDupRxBuf) {
+          rcBuf.push(rxSpot);
+        }
         if (!pskMqtt.recentSpots.has(rcUpper)) pskMqtt.recentSpots.set(rcUpper, []);
         const rcRecent = pskMqtt.recentSpots.get(rcUpper);
-        rcRecent.push(rxSpot);
-        if (rcRecent.length > 250) pskMqtt.recentSpots.set(rcUpper, rcRecent.slice(-200));
+        const isDupRxRecent = rcRecent.some(
+          (s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === rxSpotKey && Math.abs(s.timestamp - spot.timestamp) < 30000,
+        );
+        if (!isDupRxRecent) {
+          rcRecent.push(rxSpot);
+          if (rcRecent.length > 250) pskMqtt.recentSpots.set(rcUpper, rcRecent.slice(-200));
+        }
       }
     } catch {
       pskMqtt.stats.messagesDropped++;
@@ -10960,7 +10982,7 @@ function handleWSJTXMessage(msg, state) {
       const parsed = parseDecodeMessage(msg.message);
 
       const decode = {
-        id: `${msg.id}-${msg.timestamp}-${msg.deltaFreq}`,
+        id: `${msg.id}-${(msg.time?.formatted || '').replace(/[^0-9]/g, '')}-${msg.deltaFreq}-${(msg.message || '').replace(/\s+/g, '')}`,
         clientId: msg.id,
         isNew: msg.isNew,
         time: msg.time?.formatted || '',
@@ -11059,17 +11081,20 @@ function handleWSJTXMessage(msg, state) {
         }
       }
 
-      // Only keep new decodes (not replays)
+      // Only keep new decodes (not replays), deduplicate by content-based ID
       if (msg.isNew) {
-        state.decodes.push(decode);
+        const isDup = state.decodes.some((d) => d.id === decode.id);
+        if (!isDup) {
+          state.decodes.push(decode);
 
-        // Trim old decodes
-        const cutoff = Date.now() - WSJTX_MAX_AGE;
-        while (
-          state.decodes.length > WSJTX_MAX_DECODES ||
-          (state.decodes.length > 0 && state.decodes[0].timestamp < cutoff)
-        ) {
-          state.decodes.shift();
+          // Trim old decodes
+          const cutoff = Date.now() - WSJTX_MAX_AGE;
+          while (
+            state.decodes.length > WSJTX_MAX_DECODES ||
+            (state.decodes.length > 0 && state.decodes[0].timestamp < cutoff)
+          ) {
+            state.decodes.shift();
+          }
         }
       }
       break;
@@ -11104,9 +11129,19 @@ function handleWSJTXMessage(msg, state) {
           qso.lon = coords.longitude;
         }
       }
-      state.qsos.push(qso);
-      // Keep last 50 QSOs
-      if (state.qsos.length > 50) state.qsos.shift();
+      // Deduplicate: skip if same call + freq + mode within 60 seconds
+      const isDupQso = state.qsos.some(
+        (q) =>
+          q.dxCall === qso.dxCall &&
+          q.frequency === qso.frequency &&
+          q.mode === qso.mode &&
+          Math.abs(q.timestamp - qso.timestamp) < 60000,
+      );
+      if (!isDupQso) {
+        state.qsos.push(qso);
+        // Keep last 50 QSOs
+        if (state.qsos.length > 50) state.qsos.shift();
+      }
       break;
     }
 
