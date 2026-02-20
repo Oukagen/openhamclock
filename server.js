@@ -1587,18 +1587,56 @@ async function hasDirtyWorkingTree() {
   return status.stdout.trim().length > 0;
 }
 
-function runUpdateScript() {
+function spawnPromise(cmd, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const scriptPath = path.join(__dirname, 'scripts', 'update.sh');
-    const child = spawn('bash', [scriptPath, '--auto'], {
-      cwd: __dirname,
-      stdio: 'inherit',
-    });
+    const child = spawn(cmd, args, { cwd: __dirname, stdio: 'inherit', ...options });
+    child.on('error', reject);
     child.on('exit', (code) => {
       if (code === 0) return resolve();
-      reject(new Error(`update.sh exited with code ${code}`));
+      reject(new Error(`${cmd} ${args.join(' ')} exited with code ${code}`));
     });
   });
+}
+
+async function runUpdateScript() {
+  const isWin = process.platform === 'win32';
+
+  // On Linux/macOS, use the full-featured bash script (handles Pi kiosk patches, etc.)
+  if (!isWin) {
+    const scriptPath = path.join(__dirname, 'scripts', 'update.sh');
+    return spawnPromise('bash', [scriptPath, '--auto']);
+  }
+
+  // On Windows, run update steps directly (bash is not available natively)
+  logInfo('[Auto Update] Running cross-platform update (Windows)');
+
+  const branch = await getDefaultBranch();
+  const npmCmd = isWin ? 'npm.cmd' : 'npm';
+
+  // 1. Pull latest (with fallback to hard reset)
+  try {
+    await spawnPromise('git', ['pull', 'origin', branch]);
+  } catch {
+    logWarn('[Auto Update] git pull failed — falling back to hard reset');
+    await execFilePromise('git', ['fetch', 'origin', '--prune'], { cwd: __dirname });
+    await execFilePromise('git', ['reset', '--hard', `origin/${branch}`], { cwd: __dirname });
+  }
+
+  // 2. Install dependencies
+  logInfo('[Auto Update] Installing dependencies...');
+  await spawnPromise(npmCmd, ['install', '--include=dev']);
+
+  // 3. Clean old build to prevent stale chunks
+  const distPath = path.join(__dirname, 'dist');
+  if (fs.existsSync(distPath)) {
+    fs.rmSync(distPath, { recursive: true, force: true });
+  }
+
+  // 4. Rebuild frontend
+  logInfo('[Auto Update] Building frontend...');
+  await spawnPromise(npmCmd, ['run', 'build']);
+
+  logInfo('[Auto Update] Windows update complete');
 }
 
 async function autoUpdateTick(trigger = 'interval', force = false) {
@@ -6038,13 +6076,24 @@ function pskMqttConnect() {
           lon: receiverLoc?.lon,
           direction: 'tx',
         };
+        // Dedup: skip if same sender+receiver+band+freq already in buffer or recent
+        const spotKey = `${sc}|${rc}|${spot.band}|${freq}`;
         if (!pskMqtt.spotBuffer.has(scUpper)) pskMqtt.spotBuffer.set(scUpper, []);
-        pskMqtt.spotBuffer.get(scUpper).push(txSpot);
+        const scBuf = pskMqtt.spotBuffer.get(scUpper);
+        const isDupBuf = scBuf.some((s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === spotKey);
+        if (!isDupBuf) {
+          scBuf.push(txSpot);
+        }
         // Also add to recent spots (capped at insert time to prevent unbounded growth)
         if (!pskMqtt.recentSpots.has(scUpper)) pskMqtt.recentSpots.set(scUpper, []);
         const scRecent = pskMqtt.recentSpots.get(scUpper);
-        scRecent.push(txSpot);
-        if (scRecent.length > 250) pskMqtt.recentSpots.set(scUpper, scRecent.slice(-200));
+        const isDupRecent = scRecent.some(
+          (s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === spotKey && Math.abs(s.timestamp - spot.timestamp) < 30000,
+        );
+        if (!isDupRecent) {
+          scRecent.push(txSpot);
+          if (scRecent.length > 250) pskMqtt.recentSpots.set(scUpper, scRecent.slice(-200));
+        }
       }
 
       // Buffer for RX subscribers (rc is the callsign being tracked)
@@ -6056,12 +6105,23 @@ function pskMqttConnect() {
           lon: senderLoc?.lon,
           direction: 'rx',
         };
+        // Dedup: skip if same sender+receiver+band+freq already in buffer or recent
+        const rxSpotKey = `${sc}|${rc}|${spot.band}|${freq}`;
         if (!pskMqtt.spotBuffer.has(rcUpper)) pskMqtt.spotBuffer.set(rcUpper, []);
-        pskMqtt.spotBuffer.get(rcUpper).push(rxSpot);
+        const rcBuf = pskMqtt.spotBuffer.get(rcUpper);
+        const isDupRxBuf = rcBuf.some((s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === rxSpotKey);
+        if (!isDupRxBuf) {
+          rcBuf.push(rxSpot);
+        }
         if (!pskMqtt.recentSpots.has(rcUpper)) pskMqtt.recentSpots.set(rcUpper, []);
         const rcRecent = pskMqtt.recentSpots.get(rcUpper);
-        rcRecent.push(rxSpot);
-        if (rcRecent.length > 250) pskMqtt.recentSpots.set(rcUpper, rcRecent.slice(-200));
+        const isDupRxRecent = rcRecent.some(
+          (s) => `${s.sender}|${s.receiver}|${s.band}|${s.freq}` === rxSpotKey && Math.abs(s.timestamp - spot.timestamp) < 30000,
+        );
+        if (!isDupRxRecent) {
+          rcRecent.push(rxSpot);
+          if (rcRecent.length > 250) pskMqtt.recentSpots.set(rcUpper, rcRecent.slice(-200));
+        }
       }
     } catch {
       pskMqtt.stats.messagesDropped++;
@@ -10211,6 +10271,242 @@ app.get('/api/update/status', (req, res) => {
 });
 
 // ============================================
+// APRS-IS INTEGRATION
+// ============================================
+// Connects to APRS-IS network for real-time position tracking.
+// Read-only connection (passcode -1). Positions cached in memory.
+// Enable via APRS_ENABLED=true in .env
+
+const APRS_ENABLED = process.env.APRS_ENABLED === 'true';
+const APRS_HOST = process.env.APRS_HOST || 'rotate.aprs2.net';
+const APRS_PORT = parseInt(process.env.APRS_PORT || '14580');
+const APRS_FILTER = process.env.APRS_FILTER || ''; // e.g. 'r/40/-75/500' for 500km around lat/lon
+const APRS_MAX_AGE_MINUTES = parseInt(process.env.APRS_MAX_AGE_MINUTES || '60');
+const APRS_MAX_STATIONS = 500;
+
+// In-memory station cache: callsign → { call, lat, lon, symbol, comment, speed, course, altitude, timestamp, raw }
+const aprsStations = new Map();
+let aprsSocket = null;
+let aprsReconnectTimer = null;
+let aprsConnected = false;
+let aprsBuffer = '';
+
+// Parse APRS uncompressed latitude: DDMM.MMN
+function parseAprsLat(s) {
+  if (!s || s.length < 8) return NaN;
+  const deg = parseInt(s.substring(0, 2));
+  const min = parseFloat(s.substring(2, 7));
+  const hemi = s.charAt(7);
+  const lat = deg + min / 60;
+  return hemi === 'S' ? -lat : lat;
+}
+
+// Parse APRS uncompressed longitude: DDDMM.MMW
+function parseAprsLon(s) {
+  if (!s || s.length < 9) return NaN;
+  const deg = parseInt(s.substring(0, 3));
+  const min = parseFloat(s.substring(3, 8));
+  const hemi = s.charAt(8);
+  const lon = deg + min / 60;
+  return hemi === 'W' ? -lon : lon;
+}
+
+// Parse a raw APRS packet into a position object (or null if not a position packet)
+function parseAprsPacket(line) {
+  try {
+    // Format: CALLSIGN>PATH:payload
+    const headerEnd = line.indexOf(':');
+    if (headerEnd < 0) return null;
+
+    const header = line.substring(0, headerEnd);
+    const payload = line.substring(headerEnd + 1);
+    const callsign = header.split('>')[0].split('-')[0].trim(); // Strip SSID for grouping
+    const ssid = header.split('>')[0].trim(); // Keep full SSID for display
+
+    if (!callsign || callsign.length < 3) return null;
+
+    // Position data type identifiers
+    const dataType = payload.charAt(0);
+    let lat, lon, symbolTable, symbolCode, comment, rest;
+
+    if (dataType === '!' || dataType === '=') {
+      // Position without timestamp: !DDMM.MMN/DDDMM.MMW$...
+      lat = parseAprsLat(payload.substring(1, 9));
+      symbolTable = payload.charAt(9);
+      lon = parseAprsLon(payload.substring(10, 19));
+      symbolCode = payload.charAt(19);
+      comment = payload.substring(20).trim();
+    } else if (dataType === '/' || dataType === '@') {
+      // Position with timestamp: /HHMMSSh DDMM.MMN/DDDMM.MMW$...
+      lat = parseAprsLat(payload.substring(8, 16));
+      symbolTable = payload.charAt(16);
+      lon = parseAprsLon(payload.substring(17, 26));
+      symbolCode = payload.charAt(26);
+      comment = payload.substring(27).trim();
+    } else if (dataType === ';') {
+      // Object: ;NAME_____*HHMMSSh DDMM.MMN/DDDMM.MMW$...
+      const objPayload = payload.substring(11);
+      const ts = objPayload.charAt(0) === '*' ? 8 : 0;
+      rest = objPayload.substring(ts);
+      if (rest.length >= 19) {
+        lat = parseAprsLat(rest.substring(0, 8));
+        symbolTable = rest.charAt(8);
+        lon = parseAprsLon(rest.substring(9, 18));
+        symbolCode = rest.charAt(18);
+        comment = rest.substring(19).trim();
+      }
+    } else {
+      return null; // Not a position packet
+    }
+
+    if (isNaN(lat) || isNaN(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+
+    // Parse optional speed/course/altitude from comment
+    let speed = null, course = null, altitude = null;
+    const csMatch = comment?.match(/^(\d{3})\/(\d{3})/);
+    if (csMatch) {
+      course = parseInt(csMatch[1]);
+      speed = parseInt(csMatch[2]); // knots
+    }
+    const altMatch = comment?.match(/\/A=(\d{6})/);
+    if (altMatch) {
+      altitude = parseInt(altMatch[1]); // feet
+    }
+
+    return {
+      call: callsign,
+      ssid,
+      lat,
+      lon,
+      symbol: `${symbolTable}${symbolCode}`,
+      comment: comment || '',
+      speed,
+      course,
+      altitude,
+      timestamp: Date.now(),
+      raw: line,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function connectAprsIS() {
+  if (!APRS_ENABLED || aprsSocket) return;
+
+  const loginCallsign = CONFIG.callsign || 'N0CALL';
+  logInfo(`[APRS-IS] Connecting to ${APRS_HOST}:${APRS_PORT} as ${loginCallsign} (read-only)...`);
+
+  aprsSocket = new net.Socket();
+  aprsSocket.setTimeout(120000); // 2 min timeout
+
+  aprsSocket.connect(APRS_PORT, APRS_HOST, () => {
+    aprsConnected = true;
+    aprsBuffer = '';
+    logInfo('[APRS-IS] Connected, sending login...');
+
+    // Read-only login (passcode -1)
+    aprsSocket.write(`user ${loginCallsign} pass -1 vers OpenHamClock ${APP_VERSION}`);
+    if (APRS_FILTER) {
+      aprsSocket.write(` filter ${APRS_FILTER}`);
+    }
+    aprsSocket.write('\r\n');
+  });
+
+  aprsSocket.on('data', (data) => {
+    aprsBuffer += data.toString();
+    const lines = aprsBuffer.split('\n');
+    aprsBuffer = lines.pop(); // Keep incomplete last line
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue; // Server comment
+
+      const station = parseAprsPacket(trimmed);
+      if (station) {
+        aprsStations.set(station.ssid, station);
+
+        // Prune if over limit
+        if (aprsStations.size > APRS_MAX_STATIONS * 1.2) {
+          const cutoff = Date.now() - APRS_MAX_AGE_MINUTES * 60000;
+          for (const [key, val] of aprsStations) {
+            if (val.timestamp < cutoff) aprsStations.delete(key);
+          }
+          // Hard cap if still too many
+          if (aprsStations.size > APRS_MAX_STATIONS) {
+            const sorted = [...aprsStations.entries()].sort((a, b) => b[1].timestamp - a[1].timestamp);
+            aprsStations.clear();
+            for (const [k, v] of sorted.slice(0, APRS_MAX_STATIONS)) {
+              aprsStations.set(k, v);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  aprsSocket.on('error', (err) => {
+    logErrorOnce('APRS-IS', err.message);
+  });
+
+  aprsSocket.on('close', () => {
+    aprsConnected = false;
+    aprsSocket = null;
+    logInfo('[APRS-IS] Disconnected, reconnecting in 30s...');
+    clearTimeout(aprsReconnectTimer);
+    aprsReconnectTimer = setTimeout(connectAprsIS, 30000);
+  });
+
+  aprsSocket.on('timeout', () => {
+    logWarn('[APRS-IS] Socket timeout, reconnecting...');
+    try { aprsSocket.destroy(); } catch (e) {}
+  });
+}
+
+// Periodic cleanup of old stations
+setInterval(() => {
+  if (!APRS_ENABLED) return;
+  const cutoff = Date.now() - APRS_MAX_AGE_MINUTES * 60000;
+  for (const [key, val] of aprsStations) {
+    if (val.timestamp < cutoff) aprsStations.delete(key);
+  }
+}, 60000);
+
+// Start APRS-IS connection if enabled
+if (APRS_ENABLED) {
+  connectAprsIS();
+}
+
+// REST endpoint: GET /api/aprs/stations
+app.get('/api/aprs/stations', (req, res) => {
+  const cutoff = Date.now() - APRS_MAX_AGE_MINUTES * 60000;
+  const stations = [];
+  for (const [, station] of aprsStations) {
+    if (station.timestamp >= cutoff) {
+      stations.push({
+        call: station.call,
+        ssid: station.ssid,
+        lat: station.lat,
+        lon: station.lon,
+        symbol: station.symbol,
+        comment: station.comment,
+        speed: station.speed,
+        course: station.course,
+        altitude: station.altitude,
+        age: Math.floor((Date.now() - station.timestamp) / 60000),
+        timestamp: station.timestamp,
+      });
+    }
+  }
+  res.json({
+    connected: aprsConnected,
+    enabled: APRS_ENABLED,
+    count: stations.length,
+    stations: stations.sort((a, b) => b.timestamp - a.timestamp),
+  });
+});
+
+// ============================================
 // WSJT-X UDP LISTENER
 // ============================================
 // Receives decoded messages from WSJT-X, JTDX, etc.
@@ -10686,7 +10982,7 @@ function handleWSJTXMessage(msg, state) {
       const parsed = parseDecodeMessage(msg.message);
 
       const decode = {
-        id: `${msg.id}-${msg.timestamp}-${msg.deltaFreq}`,
+        id: `${msg.id}-${(msg.time?.formatted || '').replace(/[^0-9]/g, '')}-${msg.deltaFreq}-${(msg.message || '').replace(/\s+/g, '')}`,
         clientId: msg.id,
         isNew: msg.isNew,
         time: msg.time?.formatted || '',
@@ -10785,17 +11081,20 @@ function handleWSJTXMessage(msg, state) {
         }
       }
 
-      // Only keep new decodes (not replays)
+      // Only keep new decodes (not replays), deduplicate by content-based ID
       if (msg.isNew) {
-        state.decodes.push(decode);
+        const isDup = state.decodes.some((d) => d.id === decode.id);
+        if (!isDup) {
+          state.decodes.push(decode);
 
-        // Trim old decodes
-        const cutoff = Date.now() - WSJTX_MAX_AGE;
-        while (
-          state.decodes.length > WSJTX_MAX_DECODES ||
-          (state.decodes.length > 0 && state.decodes[0].timestamp < cutoff)
-        ) {
-          state.decodes.shift();
+          // Trim old decodes
+          const cutoff = Date.now() - WSJTX_MAX_AGE;
+          while (
+            state.decodes.length > WSJTX_MAX_DECODES ||
+            (state.decodes.length > 0 && state.decodes[0].timestamp < cutoff)
+          ) {
+            state.decodes.shift();
+          }
         }
       }
       break;
@@ -10830,9 +11129,19 @@ function handleWSJTXMessage(msg, state) {
           qso.lon = coords.longitude;
         }
       }
-      state.qsos.push(qso);
-      // Keep last 50 QSOs
-      if (state.qsos.length > 50) state.qsos.shift();
+      // Deduplicate: skip if same call + freq + mode within 60 seconds
+      const isDupQso = state.qsos.some(
+        (q) =>
+          q.dxCall === qso.dxCall &&
+          q.frequency === qso.frequency &&
+          q.mode === qso.mode &&
+          Math.abs(q.timestamp - qso.timestamp) < 60000,
+      );
+      if (!isDupQso) {
+        state.qsos.push(qso);
+        // Keep last 50 QSOs
+        if (state.qsos.length > 50) state.qsos.shift();
+      }
       break;
     }
 

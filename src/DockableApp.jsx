@@ -20,6 +20,7 @@ import {
   RotatorPanel,
   DXpeditionPanel,
   PSKReporterPanel,
+  APRSPanel,
   WeatherPanel,
   AmbientPanel,
   AnalogClockPanel,
@@ -84,12 +85,15 @@ export const DockableApp = ({
   filteredSatellites,
   pskReporter,
   wsjtx,
+  aprsData,
   filteredPskSpots,
   wsjtxMapSpots,
 
   // Filters
   dxFilters,
   setDxFilters,
+  mapBandFilter,
+  setMapBandFilter,
   pskFilters,
   setShowDXFilters,
   setShowPSKFilters,
@@ -106,6 +110,7 @@ export const DockableApp = ({
   toggleSatellites,
   togglePSKReporter,
   toggleWSJTX,
+  toggleAPRS,
   toggleRotatorBearing,
   hoveredSpot,
   setHoveredSpot,
@@ -150,10 +155,12 @@ export const DockableApp = ({
   const toggleWWFFEff = useInternalMapLayers ? internalMap.toggleWWFF : toggleWWFF;
   const toggleWWFFLabelsEff = useInternalMapLayers ? internalMap.toggleWWFFLabels : toggleWWFFLabels;
   const toggleSOTAEff = useInternalMapLayers ? internalMap.toggleSOTA : toggleSOTA;
+  const toggleSOTALabelsEff = useInternalMapLayers ? internalMap.toggleSOTALabels : toggleSOTALabels;
   const toggleSatellitesEff = useInternalMapLayers ? internalMap.toggleSatellites : toggleSatellites;
   const togglePSKReporterEff = useInternalMapLayers ? internalMap.togglePSKReporter : togglePSKReporter;
   const toggleWSJTXEff = useInternalMapLayers ? internalMap.toggleWSJTX : toggleWSJTX;
   const toggleRotatorBearingEff = useInternalMapLayers ? internalMap.toggleRotatorBearing : toggleRotatorBearing;
+  const toggleAPRSEff = useInternalMapLayers ? internalMap.toggleAPRS : toggleAPRS;
 
   // Per-panel zoom levels (persisted)
   const [panelZoom, setPanelZoom] = useState(() => {
@@ -280,6 +287,7 @@ export const DockableApp = ({
       pota: { name: 'POTA', icon: '🏕️' },
       wwff: { name: 'WWFF', icon: '🌲' },
       sota: { name: 'SOTA', icon: '⛰️' },
+      aprs: { name: 'APRS', icon: '📍' },
       ...(isLocalInstall ? { rotator: { name: 'Rotator', icon: '🧭' } } : {}),
       contests: { name: 'Contests', icon: '🏆' },
       ...(hasAmbient ? { ambient: { name: 'Ambient Weather', icon: '🌦️' } } : {}),
@@ -490,6 +498,8 @@ export const DockableApp = ({
         mySpots={mySpots.data}
         dxPaths={dxClusterData.paths}
         dxFilters={dxFilters}
+        mapBandFilter={mapBandFilter}
+        onMapBandFilterChange={setMapBandFilter}
         satellites={filteredSatellites}
         pskReporterSpots={filteredPskSpots}
         wsjtxSpots={wsjtxMapSpots}
@@ -507,6 +517,9 @@ export const DockableApp = ({
         showPSKReporter={mapLayersEff.showPSKReporter}
         showWSJTX={mapLayersEff.showWSJTX}
         showDXNews={mapLayersEff.showDXNews}
+        showAPRS={mapLayersEff.showAPRS}
+        aprsStations={aprsData?.filteredStations}
+        aprsWatchlistCalls={aprsData?.allWatchlistCalls}
         // ✅ Rotator bearing overlay support
         showRotatorBearing={mapLayersEff.showRotatorBearing}
         rotatorAzimuth={rot.azimuth}
@@ -697,6 +710,7 @@ export const DockableApp = ({
               lastChecked={wwffSpots.lastChecked}
               showOnMap={mapLayersEff.showWWFF}
               onToggleMap={toggleWWFFEff}
+              onHoverSpot={setHoveredSpot}
               showLabelsOnMap={mapLayersEff.showWWFFLabels}
               onToggleLabelsOnMap={toggleWWFFLabelsEff}
               onSpotClick={handleSpotClick}
@@ -713,8 +727,21 @@ export const DockableApp = ({
               lastChecked={sotaSpots.lastChecked}
               showOnMap={mapLayersEff.showSOTA}
               onToggleMap={toggleSOTAEff}
+              onHoverSpot={setHoveredSpot}
               showLabelsOnMap={mapLayersEff.showSOTALabels}
               onToggleLabelsOnMap={toggleSOTALabelsEff}
+              onSpotClick={handleSpotClick}
+            />
+          );
+          break;
+
+        case 'aprs':
+          content = (
+            <APRSPanel
+              aprsData={aprsData}
+              showOnMap={mapLayersEff.showAPRS}
+              onToggleMap={toggleAPRSEff}
+              onHoverSpot={setHoveredSpot}
               onSpotClick={handleSpotClick}
             />
           );
@@ -794,6 +821,7 @@ export const DockableApp = ({
       bandConditions,
       dxClusterData,
       dxFilters,
+      mapBandFilter,
       hoveredSpot,
       mapLayers,
       potaSpots,
@@ -810,6 +838,7 @@ export const DockableApp = ({
       wsjtx,
       handleDXChange,
       setDxFilters,
+      setMapBandFilter,
       setShowDXFilters,
       setShowPSKFilters,
       setHoveredSpot,
